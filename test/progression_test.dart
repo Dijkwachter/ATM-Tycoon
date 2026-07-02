@@ -1,0 +1,235 @@
+import 'package:atm_empire/core/constants.dart';
+import 'package:atm_empire/engine/tick_engine.dart';
+import 'package:atm_empire/models/atm.dart';
+import 'package:atm_empire/models/enums.dart';
+import 'package:atm_empire/models/game_state.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+import 'helpers/fake_random.dart';
+import 'helpers/states.dart';
+
+void main() {
+  group('Mijlpalen (GDD 9.2)', () {
+    test('het passeren van 750 totaal keert 150 uit', () {
+      // Transactie van 1,98 duwt het totaal over de eerste drempel.
+      final engine = TickEngine(
+        random: FakeRandom(doubles: [0.5, 0.5, 0.0, 0.99], bools: [false]),
+      );
+      final s = engine.tick(singleAtmState(balance: 0, totalEarned: 749));
+      expect(s.milestonesClaimed, 1);
+      expect(s.totalEarned, closeTo(749 + 1.98 + 150, 1e-9));
+      const interest = 99 * kAvgNoteValueEur * kFloatInterestPerSecond;
+      expect(s.balance, closeTo(1.98 + 150 - interest, 1e-9));
+    });
+
+    test('mijlpaalbonussen kunnen doorcascaderen', () {
+      // Op 1.999 duwt een transactie het totaal over 2.000; de bonus van
+      // 300 blijft onder 4.000, dus precies een extra mijlpaal.
+      final engine = TickEngine(
+        random: FakeRandom(doubles: [0.5, 0.5, 0.0, 0.99], bools: [false]),
+      );
+      final before = singleAtmState(balance: 0, totalEarned: 1999);
+      expect(before.milestonesClaimed, 1);
+      final s = engine.tick(before);
+      expect(s.milestonesClaimed, 2);
+      expect(s.totalEarned, closeTo(1999 + 1.98 + 300, 1e-9));
+    });
+
+    test('levels volgen de totaal-verdiend-drempels', () {
+      expect(singleAtmState(totalEarned: 0).playerLevel, PlayerLevel.dorp);
+      expect(singleAtmState(totalEarned: 1999).playerLevel, PlayerLevel.dorp);
+      expect(singleAtmState(totalEarned: 2000).playerLevel, PlayerLevel.stad);
+      expect(singleAtmState(totalEarned: 8000).playerLevel, PlayerLevel.regio);
+      expect(singleAtmState(totalEarned: 25000).playerLevel,
+          PlayerLevel.landelijk);
+      expect(singleAtmState(totalEarned: 2000).locationSlots, 6);
+    });
+  });
+
+  group('Bijvuldoel (GDD 9.2)', () {
+    test('drie bijvullingen ronden de eerste ronde af', () {
+      final engine = TickEngine(random: FakeRandom());
+      var s = singleAtmState(notesInCassette: 0, balance: 1000);
+      for (var i = 0; i < 3; i++) {
+        s = engine.refillAtm(s, 0);
+        s = s.withAtm(s.atms.first.copyWith(notesInCassette: 0));
+      }
+      expect(s.refillGoalRound, 1);
+      expect(s.refillGoalProgress, 0);
+      expect(s.refillGoalTarget, 4);
+      expect(s.refillGoalReward,
+          closeTo(kRefillGoalBaseReward * kRefillGoalRewardGrowth, 1e-9));
+      // Saldo: 1000 - 3 ritten van 60 + beloning 75.
+      expect(s.balance, closeTo(1000 - 3 * kCitCostPerTrip + 75, 1e-9));
+      expect(s.totalEarned, 75);
+    });
+
+    test('N groeit per ronde en blijft maximaal 8', () {
+      var s = singleAtmState().copyWith(refillGoalRound: 4);
+      expect(s.refillGoalTarget, 7);
+      s = s.copyWith(refillGoalRound: 10);
+      expect(s.refillGoalTarget, kRefillGoalMaxTarget);
+    });
+
+    test('een volle cassette bijvullen kan niet', () {
+      final engine = TickEngine(random: FakeRandom());
+      final s = singleAtmState(balance: 1000);
+      expect(engine.refillAtm(s, 0).balance, 1000);
+    });
+
+    test('CIT-routeoptimalisatie geeft 15% korting per level', () {
+      var s = singleAtmState(notesInCassette: 0, balance: 1000);
+      s = withUpgradeLevel(s, UpgradeId.citRoute, 2);
+      expect(s.citTripCost, closeTo(60 * 0.7, 1e-9));
+      final after = TickEngine(random: FakeRandom()).refillAtm(s, 0);
+      expect(after.balance, closeTo(1000 - 42, 1e-9));
+    });
+
+    test('CIT-planner vult automatisch bij onder 15% cassette', () {
+      final engine = TickEngine(random: FakeRandom());
+      var s = singleAtmState(notesInCassette: 14, balance: 1000);
+      s = withStaffHired(s, StaffId.citPlanner);
+      s = engine.tick(s);
+      expect(s.atms.first.notesInCassette, 100);
+      expect(s.refillGoalProgress, 1);
+
+      // Boven de drempel blijft de planner van de cassette af.
+      var idle = singleAtmState(notesInCassette: 16, balance: 1000);
+      idle = withStaffHired(idle, StaffId.citPlanner);
+      expect(engine.tick(idle).atms.first.notesInCassette, 16);
+    });
+  });
+
+  group('Aankopen (GDD 3.3 en 7)', () {
+    test('een nieuwe automaat kost 400 en groeit met factor 1,6', () {
+      final engine = TickEngine(random: FakeRandom());
+      var s = GameState.initial(nextEventInSeconds: 1000000)
+          .copyWith(balance: 500);
+      expect(s.nextAtmPrice, 400);
+      s = engine.buyAtm(s, LocationType.winkel);
+      expect(s.atms.length, 3);
+      expect(s.balance, 100);
+      expect(s.nextAtmPrice, closeTo(640, 1e-9));
+      final bought = s.atms.last;
+      expect(bought.tier, AtmTier.lobbyBasic);
+      expect(bought.notesInCassette, kTierCapacity[0]);
+      expect(bought.condition, 1.0);
+    });
+
+    test('locatiesloten begrenzen het netwerk', () {
+      final engine = TickEngine(random: FakeRandom());
+      var s = GameState.initial(nextEventInSeconds: 1000000)
+          .copyWith(balance: 100000);
+      s = engine.buyAtm(s, LocationType.winkel);
+      expect(s.atms.length, 3);
+      // Level Dorp heeft 3 sloten: de vierde wordt geweigerd.
+      final refused = engine.buyAtm(s, LocationType.zorg);
+      expect(refused.atms.length, 3);
+      expect(refused.balance, s.balance);
+    });
+
+    test('tier-upgrades volgen de kostentabel en behouden de cassette', () {
+      final engine = TickEngine(random: FakeRandom());
+      var s = singleAtmState(notesInCassette: 42, balance: 400);
+      s = engine.upgradeAtmTier(s, 0);
+      expect(s.atms.first.tier, AtmTier.lobbyPlus);
+      expect(s.balance, 50);
+      expect(s.atms.first.notesInCassette, 42);
+      // Volgende stap kost 840: onvoldoende saldo, geen wijziging.
+      expect(engine.upgradeAtmTier(s, 0).atms.first.tier, AtmTier.lobbyPlus);
+    });
+
+    test('netwerk-upgrades verdubbelen in prijs en hebben een maximum', () {
+      final engine = TickEngine(random: FakeRandom());
+      var s = singleAtmState(balance: 900);
+      s = engine.buyUpgrade(s, UpgradeId.cassettes);
+      expect(s.upgradeLevel(UpgradeId.cassettes), 1);
+      expect(s.balance, 600);
+      expect(s.upgrade(UpgradeId.cassettes).nextLevelCost, 600);
+      s = engine.buyUpgrade(s, UpgradeId.cassettes);
+      expect(s.upgradeLevel(UpgradeId.cassettes), 2);
+      expect(s.balance, 0);
+
+      var maxed = withUpgradeLevel(
+          singleAtmState(balance: 100000), UpgradeId.citRoute, 4);
+      maxed = engine.buyUpgrade(maxed, UpgradeId.citRoute);
+      expect(maxed.upgradeLevel(UpgradeId.citRoute), 4);
+      expect(maxed.balance, 100000);
+    });
+
+    test('grotere cassettes geven 40% capaciteit per level', () {
+      expect(Atm.capacityFor(AtmTier.lobbyBasic, 0), 100);
+      expect(Atm.capacityFor(AtmTier.lobbyBasic, 1), 140);
+      expect(Atm.capacityFor(AtmTier.ttwRecycler, 5), 1020);
+    });
+
+    test('personeel is eenmalig en kost de tabelprijs', () {
+      final engine = TickEngine(random: FakeRandom());
+      var s = singleAtmState(balance: 4000);
+      s = engine.hireStaff(s, StaffId.analyst);
+      expect(s.hasStaff(StaffId.analyst), isTrue);
+      expect(s.balance, 0);
+      expect(s.incomeMultiplier, closeTo(1.10, 1e-9));
+      // Nogmaals aannemen verandert niets.
+      expect(engine.hireStaff(s, StaffId.analyst).balance, 0);
+    });
+  });
+
+  group('Prestige (GDD 9.3)', () {
+    test('onder de drempel kan prestige niet', () {
+      final engine = TickEngine(random: FakeRandom());
+      final s = singleAtmState(totalEarned: 24999);
+      expect(engine.prestige(s).prestigeLevel, 0);
+    });
+
+    test('prestige reset het netwerk maar houdt bankcontractlevels', () {
+      final engine = TickEngine(random: FakeRandom());
+      var s = singleAtmState(totalEarned: 25000, balance: 9999);
+      s = s.copyWith(
+        banks: [
+          for (final b in s.banks)
+            b.copyWith(contractLevel: 3, connected: true),
+        ],
+      );
+      final after = engine.prestige(s);
+      expect(after.prestigeLevel, 1);
+      expect(after.balance, kStartingBalance);
+      expect(after.totalEarned, 0);
+      expect(after.atms.length, kStartingAtmCount);
+      expect(after.milestonesClaimed, 0);
+      expect(after.bank(BankId.oranje).contractLevel, 3);
+      // De Zuiderbank-aansluiting is een aankoop en reset dus wel.
+      expect(after.bank(BankId.zuider).connected, isFalse);
+      expect(after.bank(BankId.zuider).contractLevel, 3);
+    });
+
+    test('prestige geeft +25% en activeert het 100 euro biljet', () {
+      final engine = TickEngine(random: FakeRandom());
+      final after = engine.prestige(singleAtmState(totalEarned: 25000));
+      expect(after.hundredEuroNoteActive, isTrue);
+      // 1,25 prestige x 1,6 biljet = 2,0.
+      expect(after.incomeMultiplier, closeTo(2.0, 1e-9));
+    });
+
+    test('het 100 euro biljet laat cassettes 40% sneller leeglopen', () {
+      // Na prestige: extra-biljet-roll 0,5 onder de kans 0,6, dus drie
+      // biljetten voor een transactie, en inkomen x2.
+      final engine = TickEngine(
+        random: FakeRandom(
+          doubles: [0.5, 0.5, 0.5, 0.0, 0.99],
+          bools: [true],
+        ),
+      );
+      var s = TickEngine(random: FakeRandom())
+          .prestige(singleAtmState(totalEarned: 25000));
+      s = s.copyWith(
+        atms: [s.atms.first],
+        tick: tickForHour(12),
+        nextEventInSeconds: 1000000,
+      );
+      final after = engine.tick(s);
+      expect(after.atms.first.notesInCassette, kTierCapacity[0] - 3);
+      expect(after.totalEarned, closeTo(2.0 * 1.1 * 0.9 * 2.0, 1e-9));
+    });
+  });
+}
