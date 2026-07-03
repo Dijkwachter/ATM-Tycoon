@@ -259,6 +259,10 @@ class TickEngine {
     }
 
     s = _credit(s, income);
+    // Deze opname trekt de cassette leeg: meld dat aan de UI en audio.
+    if (atm.notesInCassette - notesNeeded == 0) {
+      _emit(FeedbackType.cassetteEmpty, 0, atmId: atm.id);
+    }
     return (
       s,
       atm.copyWith(

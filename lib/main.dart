@@ -1,6 +1,7 @@
 // App-shell van ATM Empire: start Hive, rekent offline-inkomen door,
 // draait de tick-engine en toont de drie tabs uit GDD 10.
 
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -8,7 +9,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:path_provider/path_provider.dart';
 
+import 'audio/game_audio.dart';
+import 'audio/music_intensity.dart';
 import 'core/constants.dart';
+import 'engine/feedback.dart';
 import 'engine/game_controller.dart';
 import 'models/hive_adapters.dart';
 import 'persistence/save_repository.dart';
@@ -55,6 +59,8 @@ class AtmEmpireApp extends ConsumerStatefulWidget {
 class _AtmEmpireAppState extends ConsumerState<AtmEmpireApp>
     with WidgetsBindingObserver {
   int _tabIndex = 0;
+  bool _muted = false;
+  StreamSubscription<GameFeedback>? _audioFeedback;
 
   @override
   void initState() {
@@ -62,6 +68,13 @@ class _AtmEmpireAppState extends ConsumerState<AtmEmpireApp>
     WidgetsBinding.instance.addObserver(this);
     final controller = ref.read(gameControllerProvider.notifier);
     controller.start();
+    final audio = ref.read(gameAudioProvider);
+    unawaited(audio.init());
+    _audioFeedback = controller.feedback.listen((event) {
+      if (event.type == FeedbackType.cassetteEmpty) {
+        audio.playCassetteEmpty();
+      }
+    });
     final offline = controller.lastOfflineResult;
     if (offline != null) {
       debugPrint(
@@ -74,6 +87,7 @@ class _AtmEmpireAppState extends ConsumerState<AtmEmpireApp>
 
   @override
   void dispose() {
+    unawaited(_audioFeedback?.cancel());
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -93,6 +107,15 @@ class _AtmEmpireAppState extends ConsumerState<AtmEmpireApp>
     final state = ref.watch(gameControllerProvider);
     final controller = ref.read(gameControllerProvider.notifier);
     final brokenCount = state.atms.where((a) => a.isBroken).length;
+
+    // Muziek volgt de spelstaat: tempo met de drukte, percussie bij
+    // drukte en bijna lege cassettes.
+    ref.listen(gameControllerProvider, (_, next) {
+      ref.read(gameAudioProvider).update(
+            speed: musicSpeedFor(next),
+            percussionLevel: percussionLevelFor(next),
+          );
+    });
 
     if (state.tick % kAutosaveIntervalSeconds == 0) {
       debugPrint(
@@ -115,6 +138,11 @@ class _AtmEmpireAppState extends ConsumerState<AtmEmpireApp>
                 GameHeader(
                   state: state,
                   incomePerMinute: controller.incomePerMinute,
+                  muted: _muted,
+                  onToggleMute: () {
+                    setState(() => _muted = !_muted);
+                    ref.read(gameAudioProvider).setMuted(_muted);
+                  },
                 ),
                 Expanded(
                   child: IndexedStack(

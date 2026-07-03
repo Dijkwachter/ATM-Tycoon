@@ -20,6 +20,9 @@ enum FeedbackType {
 
   /// Verzekeringsuitkering na een afgeslagen plofkraak.
   insurance,
+
+  /// Een cassette is zojuist leeggetrokken: audio-sting en UI-signaal.
+  cassetteEmpty,
 }
 
 class GameFeedback {

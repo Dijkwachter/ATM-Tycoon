@@ -14,10 +14,14 @@ class GameHeader extends StatelessWidget {
     super.key,
     required this.state,
     required this.incomePerMinute,
+    this.muted = false,
+    this.onToggleMute,
   });
 
   final GameState state;
   final double incomePerMinute;
+  final bool muted;
+  final VoidCallback? onToggleMute;
 
   @override
   Widget build(BuildContext context) {
@@ -58,10 +62,29 @@ class GameHeader extends StatelessWidget {
                           color: AppColors.ink.withValues(alpha: 0.8),
                         ),
                       ),
-                      _InfoChip(
-                        label: formatGameClock(
-                            state.tick, kGameHourRealSeconds),
-                        icon: Icons.schedule,
+                      Row(
+                        children: [
+                          if (onToggleMute != null)
+                            GestureDetector(
+                              onTap: onToggleMute,
+                              child: Padding(
+                                padding: const EdgeInsets.only(right: 8),
+                                child: Icon(
+                                  muted
+                                      ? Icons.volume_off_outlined
+                                      : Icons.volume_up_outlined,
+                                  size: 18,
+                                  color:
+                                      AppColors.ink.withValues(alpha: 0.8),
+                                ),
+                              ),
+                            ),
+                          _InfoChip(
+                            label: formatGameClock(
+                                state.tick, kGameHourRealSeconds),
+                            icon: Icons.schedule,
+                          ),
+                        ],
                       ),
                     ],
                   ),
