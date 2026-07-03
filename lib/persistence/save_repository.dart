@@ -12,6 +12,7 @@ class SaveRepository {
   static const String boxName = 'atm_empire_save';
   static const String _stateKey = 'state';
   static const String _savedAtKey = 'savedAtMillis';
+  static const String _highScoreKey = 'highScore';
 
   final Box<dynamic> _box;
 
@@ -23,6 +24,18 @@ class SaveRepository {
   Future<void> save(GameState state, DateTime now) async {
     await _box.put(_stateKey, state);
     await _box.put(_savedAtKey, now.millisecondsSinceEpoch);
+    await _box.flush();
+  }
+
+  /// Hoogste totaal-verdiend ooit, over alle spellen heen. Overleeft een
+  /// nieuw spel; alleen een hogere score overschrijft hem.
+  double get highScore => (_box.get(_highScoreKey) as num?)?.toDouble() ?? 0;
+
+  Future<void> saveHighScore(double score) async {
+    if (score <= highScore) {
+      return;
+    }
+    await _box.put(_highScoreKey, score);
     await _box.flush();
   }
 

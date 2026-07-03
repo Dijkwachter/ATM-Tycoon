@@ -42,6 +42,24 @@ class MapScreen extends ConsumerWidget {
       children: [
         if (state.activeEvent != null)
           EventBanner(event: state.activeEvent!),
+        if (state.atms.isEmpty)
+          Container(
+            margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: AppColors.card,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: AppColors.cabinetShade.withValues(alpha: 0.4),
+              ),
+            ),
+            child: Text(
+              'Welkom! Je start met ${formatEuroCompact(state.balance)}. '
+              'Koop hieronder je eerste automaat: kies een drukke locatie '
+              'voor snel geld, of een rustige die de nacht doorverdient.',
+              style: const TextStyle(fontFamily: kTextFont, fontSize: 14),
+            ),
+          ),
         for (final atm in state.atms) ...[
           PillOverlay(feedback: controller.feedback, atmId: atm.id),
           AtmTile(
@@ -244,7 +262,13 @@ class _AtmDetailSheet extends ConsumerWidget {
             const SizedBox(height: 12),
             _detailRow('Inkomen per transactie',
                 'EUR ${formatEuro(atm.incomePerTransaction)}'),
-            _detailRow('Cassette', '${atm.notesInCassette} van $capacity'),
+            _detailRow(
+              'Cassette',
+              '${formatEuro((atm.notesInCassette * kNotesPerUnit).toDouble(), decimals: 0)}'
+              ' van '
+              '${formatEuro((capacity * kNotesPerUnit).toDouble(), decimals: 0)}'
+              ' biljetten',
+            ),
             _detailRow('Staat', '${(atm.condition * 100).round()}%'),
             _detailRow('Totaal verdiend',
                 'EUR ${formatEuro(atm.lifetimeEarned)}'),

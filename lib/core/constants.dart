@@ -130,13 +130,21 @@ const double kAtmBasePrice = 400;
 /// Prijsgroeifactor per volgende gekochte automaat. Bron: Parameters!B28.
 const double kAtmPriceGrowthFactor = 1.6;
 
-/// Aantal automaten waarmee een nieuw spel start (Lobby basic, gratis).
-/// Bron: Simulatie!B5 ("Start: 2x Lobby basic").
-const int kStartingAtmCount = 2;
+/// Een nieuw spel start zonder automaten; de speler koopt zijn netwerk
+/// zelf bij elkaar vanaf het startsaldo (Ontwerper dd 2026-07-03).
+/// De eerste [kFlatPricedAtmCount] automaten kosten de basisprijs, daarna
+/// groeit de prijs met [kAtmPriceGrowthFactor].
+const int kFlatPricedAtmCount = 2;
 
-/// Startsaldo in EUR. Bron: Simulatie-tab rekent vanaf 0; bevestigd door
-/// Ontwerper dd 2026-07-02.
-const double kStartingBalance = 0;
+/// Startsaldo in EUR: genoeg voor twee automaten van de basisprijs, of
+/// een automaat plus een eerste investering (Ontwerper dd 2026-07-03).
+const double kStartingBalance = 1000;
+
+/// Weergaveschaal van de cassette: de engine rekent in spreadsheet-
+/// eenheden (basis-cassette 100), de UI toont echte biljetten (basis-
+/// cassette 2.000). Ontwerper dd 2026-07-03: "een cassette wordt normaal
+/// met 2000 biljetten gevuld".
+const int kNotesPerUnit = 20;
 
 // ---------------------------------------------------------------------------
 // Dagcyclus. Bron: GDD 5.

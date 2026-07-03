@@ -87,6 +87,23 @@ class GameController extends Notifier<GameState> {
     _tickTimer ??= Timer.periodic(const Duration(seconds: 1), (_) => _onTick());
   }
 
+  /// Of er een bewaard spel is om mee verder te gaan (introscherm).
+  bool get hasSave => ref.read(saveRepositoryProvider)?.load() != null;
+
+  /// Hoogste totaal-verdiend ooit, inclusief het lopende spel.
+  double get highScore {
+    final stored = ref.read(saveRepositoryProvider)?.highScore ?? 0;
+    return state.totalEarned > stored ? state.totalEarned : stored;
+  }
+
+  /// Begint een vers spel (introscherm). De high score blijft staan.
+  void newGame() {
+    lastOfflineResult = null;
+    _earnedSamples.clear();
+    state = GameState.initial(nextEventInSeconds: _firstEventInterval());
+    unawaited(saveNow());
+  }
+
   void _onTick() {
     _earnedSamples.add(state.totalEarned);
     if (_earnedSamples.length > 60) {
@@ -101,12 +118,14 @@ class GameController extends Notifier<GameState> {
   }
 
   /// Slaat de staat plus tijdstempel op; ook aangeroepen bij app-pauze.
+  /// Werkt en passant de high score bij.
   Future<void> saveNow() async {
     final repository = ref.read(saveRepositoryProvider);
     if (repository == null) {
       return;
     }
     await repository.save(state, ref.read(clockProvider)());
+    await repository.saveHighScore(state.totalEarned);
   }
 
   // Spelersacties: dunne doorgifte naar de engine.

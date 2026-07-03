@@ -101,14 +101,20 @@ void main() {
   });
 
   group('Aankopen (GDD 3.3 en 7)', () {
-    test('een nieuwe automaat kost 400 en groeit met factor 1,6', () {
+    test('de eerste twee automaten kosten 400, daarna groeit de prijs', () {
       final engine = TickEngine(random: FakeRandom());
-      var s = GameState.initial(nextEventInSeconds: 1000000)
-          .copyWith(balance: 500);
+      var s = GameState.initial(nextEventInSeconds: 1000000);
+      // Startsaldo 1.000: twee automaten van 400 passen erin.
+      expect(s.balance, 1000);
+      expect(s.atms, isEmpty);
       expect(s.nextAtmPrice, 400);
       s = engine.buyAtm(s, LocationType.winkel);
-      expect(s.atms.length, 3);
-      expect(s.balance, 100);
+      expect(s.atms.length, 1);
+      expect(s.balance, 600);
+      expect(s.nextAtmPrice, 400);
+      s = engine.buyAtm(s, LocationType.station);
+      expect(s.atms.length, 2);
+      expect(s.balance, 200);
       expect(s.nextAtmPrice, closeTo(640, 1e-9));
       final bought = s.atms.last;
       expect(bought.tier, AtmTier.lobbyBasic);
@@ -121,6 +127,8 @@ void main() {
       var s = GameState.initial(nextEventInSeconds: 1000000)
           .copyWith(balance: 100000);
       s = engine.buyAtm(s, LocationType.winkel);
+      s = engine.buyAtm(s, LocationType.station);
+      s = engine.buyAtm(s, LocationType.horeca);
       expect(s.atms.length, 3);
       // Level Dorp heeft 3 sloten: de vierde wordt geweigerd.
       final refused = engine.buyAtm(s, LocationType.zorg);
@@ -195,7 +203,7 @@ void main() {
       expect(after.prestigeLevel, 1);
       expect(after.balance, kStartingBalance);
       expect(after.totalEarned, 0);
-      expect(after.atms.length, kStartingAtmCount);
+      expect(after.atms, isEmpty);
       expect(after.milestonesClaimed, 0);
       expect(after.bank(BankId.oranje).contractLevel, 3);
       // De Zuiderbank-aansluiting is een aankoop en reset dus wel.
@@ -220,10 +228,13 @@ void main() {
           bools: [true],
         ),
       );
+      // Prestige start tegenwoordig zonder automaten: zet er een neer.
       var s = TickEngine(random: FakeRandom())
           .prestige(singleAtmState(totalEarned: 25000));
       s = s.copyWith(
-        atms: [s.atms.first],
+        atms: [
+          Atm.fresh(id: 0, location: LocationType.station),
+        ],
         tick: tickForHour(12),
         nextEventInSeconds: 1000000,
       );

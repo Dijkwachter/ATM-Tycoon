@@ -20,6 +20,21 @@ void main() {
     );
   }
 
+  /// Door het introscherm heen: start een vers spel.
+  Future<void> startGame(WidgetTester tester) async {
+    await pumpApp(tester);
+    await tester.tap(find.text('Start spel'));
+    await tester.pump();
+  }
+
+  /// Koopt vanaf de kaart een automaat op het station.
+  Future<void> buyStationAtm(WidgetTester tester) async {
+    await tester.tap(find.text('Nieuwe automaat'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Station'));
+    await tester.pumpAndSettle();
+  }
+
   /// Ontmantelt de app zodat de periodieke ticktimer netjes wordt
   /// opgeruimd voordat de test eindigt.
   Future<void> tearDownApp(WidgetTester tester) async {
@@ -27,13 +42,27 @@ void main() {
     await tester.pump();
   }
 
-  testWidgets('de app start met header, tegels en tabbar', (tester) async {
+  testWidgets('het introscherm toont logo, high score en startknop',
+      (tester) async {
     await pumpApp(tester);
 
+    expect(find.text('EMPIRE'), findsOneWidget);
+    expect(find.text('HIGH SCORE - TOTAAL VERDIEND'), findsOneWidget);
+    expect(find.text('Start spel'), findsOneWidget);
+    // Zonder save is er geen verder-spelen-knop.
+    expect(find.text('Verder spelen'), findsNothing);
+
+    await tearDownApp(tester);
+  });
+
+  testWidgets('een nieuw spel start met 0 automaten en 1.000 saldo',
+      (tester) async {
+    await startGame(tester);
+
     expect(find.text('ATM EMPIRE'), findsOneWidget);
-    // Twee starter-automaten met elk drie actieknoppen.
-    expect(find.text('Servicing'), findsNWidgets(2));
-    expect(find.text('Upgrade'), findsNWidgets(2));
+    expect(find.text('Servicing'), findsNothing);
+    expect(find.textContaining('Welkom!'), findsOneWidget);
+    expect(find.text('Locaties: 0 van 3'), findsOneWidget);
     // Tabbar met drie tabs.
     expect(find.text('Kaart'), findsOneWidget);
     expect(find.text('Upgrades'), findsOneWidget);
@@ -42,8 +71,20 @@ void main() {
     await tearDownApp(tester);
   });
 
+  testWidgets('een automaat kopen zet een tegel op de kaart',
+      (tester) async {
+    await startGame(tester);
+    await buyStationAtm(tester);
+
+    expect(find.textContaining('Station'), findsOneWidget);
+    expect(find.text('Servicing'), findsOneWidget);
+    expect(find.text('Upgrade'), findsOneWidget);
+
+    await tearDownApp(tester);
+  });
+
   testWidgets('de engine tikt en de klok loopt', (tester) async {
-    await pumpApp(tester);
+    await startGame(tester);
 
     // Vijf ticks is een speluur (GDD 5).
     for (var i = 0; i < 5; i++) {
@@ -55,7 +96,7 @@ void main() {
   });
 
   testWidgets('tabs wisselen naar Upgrades en Financien', (tester) async {
-    await pumpApp(tester);
+    await startGame(tester);
 
     await tester.tap(find.text('Upgrades'));
     await tester.pump();
@@ -76,17 +117,18 @@ void main() {
     await tearDownApp(tester);
   });
 
-  testWidgets('de detail-sheet opent bij een tik op een tegel',
+  testWidgets('de detail-sheet opent en toont de cassette in biljetten',
       (tester) async {
-    await pumpApp(tester);
+    await startGame(tester);
+    await buyStationAtm(tester);
 
-    await tester.tap(find.text('Servicing').first,
-        warnIfMissed: false);
-    // De tegel zelf opent de sheet; tik op de titelregio van de eerste kast.
     await tester.tap(find.textContaining('Station'));
     await tester.pumpAndSettle();
     expect(find.text('Inkomen per transactie'), findsOneWidget);
     expect(find.text('Etmaalgemiddelde'), findsOneWidget);
+    // Basis-cassette in echte biljetten: capaciteit 2.000 (kNotesPerUnit);
+    // er kan al een opname geweest zijn, dus de stand zelf ligt niet vast.
+    expect(find.textContaining('van 2.000 biljetten'), findsWidgets);
 
     // Sluit de sheet weer.
     await tester.tapAt(const Offset(10, 10));
@@ -96,7 +138,7 @@ void main() {
   });
 
   testWidgets('prestige is bij de start vergrendeld', (tester) async {
-    await pumpApp(tester);
+    await startGame(tester);
 
     await tester.tap(find.text('Financien'));
     await tester.pump();

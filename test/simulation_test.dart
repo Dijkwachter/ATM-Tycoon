@@ -15,16 +15,18 @@ void main() {
     final engine = TickEngine(random: Random(42));
     var s = GameState.initial();
 
-    // Kooprotatie voor nieuwe automaten: gemengde locatiesoorten.
+    // Kooprotatie voor nieuwe automaten. Het spel start om 00:00 zonder
+    // automaten; een verstandige speler koopt eerst een dag- en een
+    // nachtlocatie (station plus horeca), daarna gemengd.
     const locations = [
+      LocationType.station,
+      LocationType.horeca,
       LocationType.winkel,
       LocationType.winkelcentrum,
       LocationType.evenement,
       LocationType.reizen,
       LocationType.snelweg,
       LocationType.zorg,
-      LocationType.station,
-      LocationType.horeca,
       LocationType.openbaar,
       LocationType.winkel,
     ];
@@ -117,13 +119,16 @@ void main() {
     expect(s.totalEarned, lessThan(60000));
 
     // Er is daadwerkelijk gespeeld: netwerk gegroeid en ritten betaald.
-    expect(s.atms.length, greaterThan(kStartingAtmCount));
+    expect(s.atms.length, greaterThan(2));
   });
 
   test('simulatie is deterministisch bij gelijke seed', () {
     GameState run() {
       final engine = TickEngine(random: Random(7));
       var s = GameState.initial();
+      // Het startsaldo dekt twee automaten van de basisprijs.
+      s = engine.buyAtm(s, LocationType.station);
+      s = engine.buyAtm(s, LocationType.horeca);
       for (var i = 0; i < 300; i++) {
         s = engine.tick(s);
       }

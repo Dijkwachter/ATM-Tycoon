@@ -51,18 +51,14 @@ class GameState {
     this.activeEvent,
   });
 
-  /// Startstaat: 2x Lobby basic (Simulatie!B5), volle cassettes, staat 100%,
-  /// saldo 0 (Ontwerper dd 2026-07-02). De starters staan op een dag- en een
-  /// nachtlocatie (GDD 5 adviseert een mix); station plus horeca middelt over
-  /// het etmaal op ~1,0, consistent met Parameters!B26.
+  /// Startstaat: geen automaten en 1.000 EUR startsaldo (Ontwerper dd
+  /// 2026-07-03). De speler kiest zelf: twee automaten van de basisprijs,
+  /// of een automaat plus een eerste upgrade.
   factory GameState.initial({int nextEventInSeconds = kEventIntervalMinSeconds}) {
     return GameState(
       balance: kStartingBalance,
       totalEarned: 0,
-      atms: [
-        Atm.fresh(id: 0, location: LocationType.station),
-        Atm.fresh(id: 1, location: LocationType.horeca),
-      ],
+      atms: const [],
       banks: [
         for (final id in BankId.values)
           Bank(id: id, connected: id != BankId.zuider),
@@ -174,9 +170,14 @@ class GameState {
 
   /// Prijs van de volgende automaat: 400 x 1,6^(gekochte automaten); de twee
   /// starters tellen niet mee (GDD 3.3, Parameters!B28, Simulatie!B5).
+  /// De eerste [kFlatPricedAtmCount] automaten kosten de basisprijs;
+  /// daarna groeit de prijs per aankoop met [kAtmPriceGrowthFactor].
   double get nextAtmPrice =>
       kAtmBasePrice *
-      math.pow(kAtmPriceGrowthFactor, atms.length - kStartingAtmCount);
+      math.pow(
+        kAtmPriceGrowthFactor,
+        math.max(0, atms.length - (kFlatPricedAtmCount - 1)),
+      );
 
   /// Reparatieduur bij uitval, korter met monteur (GDD 4).
   int get repairDurationSeconds => hasStaff(StaffId.mechanic)

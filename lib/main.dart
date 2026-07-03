@@ -18,6 +18,7 @@ import 'models/hive_adapters.dart';
 import 'persistence/save_repository.dart';
 import 'ui/format.dart';
 import 'ui/screens/finance_screen.dart';
+import 'ui/screens/intro_screen.dart';
 import 'ui/screens/map_screen.dart';
 import 'ui/screens/upgrades_screen.dart';
 import 'ui/theme.dart';
@@ -60,6 +61,7 @@ class _AtmEmpireAppState extends ConsumerState<AtmEmpireApp>
     with WidgetsBindingObserver {
   int _tabIndex = 0;
   bool _muted = false;
+  bool _inGame = false;
   StreamSubscription<GameFeedback>? _audioFeedback;
 
   @override
@@ -67,7 +69,6 @@ class _AtmEmpireAppState extends ConsumerState<AtmEmpireApp>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     final controller = ref.read(gameControllerProvider.notifier);
-    controller.start();
     final audio = ref.read(gameAudioProvider);
     unawaited(audio.init());
     _audioFeedback = controller.feedback.listen((event) {
@@ -75,6 +76,16 @@ class _AtmEmpireAppState extends ConsumerState<AtmEmpireApp>
         audio.playCassetteEmpty();
       }
     });
+  }
+
+  /// Vanaf het introscherm: verder spelen of een vers spel starten. De
+  /// klok gaat pas lopen als de speler het spel in gaat.
+  void _enterGame({required bool fresh}) {
+    final controller = ref.read(gameControllerProvider.notifier);
+    if (fresh) {
+      controller.newGame();
+    }
+    controller.start();
     final offline = controller.lastOfflineResult;
     if (offline != null) {
       debugPrint(
@@ -83,6 +94,7 @@ class _AtmEmpireAppState extends ConsumerState<AtmEmpireApp>
         'bijgeschreven',
       );
     }
+    setState(() => _inGame = true);
   }
 
   @override
@@ -130,7 +142,14 @@ class _AtmEmpireAppState extends ConsumerState<AtmEmpireApp>
       title: 'ATM Empire',
       debugShowCheckedModeBanner: false,
       theme: buildAppTheme(),
-      home: Scaffold(
+      home: !_inGame
+          ? IntroScreen(
+              hasSave: controller.hasSave,
+              highScore: controller.highScore,
+              onContinue: () => _enterGame(fresh: false),
+              onNewGame: () => _enterGame(fresh: true),
+            )
+          : Scaffold(
         body: Stack(
           children: [
             Column(

@@ -495,12 +495,27 @@ class _CassetteBar extends StatelessWidget {
     final label = minutesUntilEmpty.isFinite
         ? 'leeg over ${minutesUntilEmpty.toStringAsFixed(1)} min'
         : 'stabiel';
-    return _LabeledBar(
-      fraction: capacity == 0 ? 0 : notes / capacity,
-      color: urgent ? AppColors.warning : AppColors.incomePill,
-      left: 'Cassette $notes van $capacity',
-      right: notes == 0 ? 'leeg' : label,
-      rightColor: urgent ? AppColors.warning : null,
+    // Weergave in echte biljetten (basis-cassette 2.000); de teller telt
+    // geanimeerd naar de nieuwe stand, zodat een bijvulling zichtbaar
+    // naar vol loopt.
+    final targetNotes = (notes * kNotesPerUnit).toDouble();
+    final displayCapacity = formatEuro(
+      (capacity * kNotesPerUnit).toDouble(),
+      decimals: 0,
+    );
+    return TweenAnimationBuilder<double>(
+      tween: Tween<double>(end: targetNotes),
+      duration: const Duration(milliseconds: 600),
+      curve: Curves.easeOutCubic,
+      builder: (context, animatedNotes, _) => _LabeledBar(
+        fraction: capacity == 0 ? 0 : notes / capacity,
+        color: urgent ? AppColors.warning : AppColors.incomePill,
+        left: 'Cassette '
+            '${formatEuro(animatedNotes.roundToDouble(), decimals: 0)} '
+            'van $displayCapacity biljetten',
+        right: notes == 0 ? 'leeg' : label,
+        rightColor: urgent ? AppColors.warning : null,
+      ),
     );
   }
 }
