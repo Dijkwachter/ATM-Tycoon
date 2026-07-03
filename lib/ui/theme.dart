@@ -44,6 +44,12 @@ abstract final class AppColors {
 
   /// Randen en geleiders op de gele kasten.
   static const Color cabinetShade = Color(0xFFB8860B);
+
+  /// Stalen muurframe van through-the-wall-automaten (tier 3 en 4).
+  static const Color steel = Color(0xFF8E959C);
+
+  /// Vlakke, goedkopere kastkleur van de instap-tier (lobby basic).
+  static const Color cabinetBasic = Color(0xFFF8D566);
 }
 
 /// De headergradient van geel naar diep goudgeel (GDD 10).
