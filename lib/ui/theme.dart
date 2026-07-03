@@ -53,9 +53,11 @@ const LinearGradient kHeaderGradient = LinearGradient(
   colors: [AppColors.gradientTop, AppColors.gradientBottom],
 );
 
-/// Space Grotesk voor tekst, IBM Plex Mono voor cijfers (GDD 10).
-const String kTextFont = 'Space Grotesk';
-const String kDigitFont = 'IBM Plex Mono';
+/// Outfit voor tekst (modern geometrisch), Chakra Petch voor cijfers en
+/// displays (technisch, past bij LED-panelen). Beide met echte 400/600/700
+/// gewichten, zodat vet niet meer kunstmatig wordt gerenderd.
+const String kTextFont = 'Outfit';
+const String kDigitFont = 'Chakra Petch';
 
 ThemeData buildAppTheme() {
   final base = ThemeData(
@@ -88,6 +90,10 @@ TextStyle ledDigits(double size, {Color color = AppColors.ledGlow}) {
     fontWeight: FontWeight.w700,
     fontSize: size,
     color: color,
+    letterSpacing: 0.5,
+    // Tabulaire cijfers: elk cijfer even breed, zodat oplopende
+    // bedragen niet heen en weer springen op het paneel.
+    fontFeatures: const [FontFeature.tabularFigures()],
     shadows: [
       Shadow(color: color.withValues(alpha: 0.55), blurRadius: 8),
     ],

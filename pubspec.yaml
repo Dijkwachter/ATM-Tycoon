@@ -27,11 +27,17 @@ flutter:
     - assets/icons/
 
   fonts:
-    - family: Space Grotesk
+    - family: Outfit
       fonts:
-        - asset: assets/fonts/SpaceGrotesk-Regular.ttf
-    - family: IBM Plex Mono
+        - asset: assets/fonts/Outfit-Regular.ttf
+        - asset: assets/fonts/Outfit-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/Outfit-Bold.ttf
+          weight: 700
+    - family: Chakra Petch
       fonts:
-        - asset: assets/fonts/IBMPlexMono-Regular.ttf
-        - asset: assets/fonts/IBMPlexMono-Bold.ttf
+        - asset: assets/fonts/ChakraPetch-Regular.ttf
+        - asset: assets/fonts/ChakraPetch-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/ChakraPetch-Bold.ttf
           weight: 700
