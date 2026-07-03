@@ -1,6 +1,5 @@
-// Kale bootstrap voor het fundament: start Hive, rekent offline-inkomen
-// door, draait de tick-engine en logt de state. Geen UI-schermen; die
-// volgen in een latere sessie (GDD 10).
+// App-shell van ATM Empire: start Hive, rekent offline-inkomen door,
+// draait de tick-engine en toont de drie tabs uit GDD 10.
 
 import 'dart:io';
 
@@ -13,6 +12,14 @@ import 'core/constants.dart';
 import 'engine/game_controller.dart';
 import 'models/hive_adapters.dart';
 import 'persistence/save_repository.dart';
+import 'ui/format.dart';
+import 'ui/screens/finance_screen.dart';
+import 'ui/screens/map_screen.dart';
+import 'ui/screens/upgrades_screen.dart';
+import 'ui/theme.dart';
+import 'ui/widgets/coin_rain.dart';
+import 'ui/widgets/frosted_tab_bar.dart';
+import 'ui/widgets/game_header.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -47,6 +54,8 @@ class AtmEmpireApp extends ConsumerStatefulWidget {
 
 class _AtmEmpireAppState extends ConsumerState<AtmEmpireApp>
     with WidgetsBindingObserver {
+  int _tabIndex = 0;
+
   @override
   void initState() {
     super.initState();
@@ -82,36 +91,55 @@ class _AtmEmpireAppState extends ConsumerState<AtmEmpireApp>
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(gameControllerProvider);
-    final offline =
-        ref.read(gameControllerProvider.notifier).lastOfflineResult;
+    final controller = ref.read(gameControllerProvider.notifier);
+    final brokenCount = state.atms.where((a) => a.isBroken).length;
 
-    // Log de kernstaat elke autosave-periode; genoeg om het fundament te
-    // bewijzen zonder placeholder-UI.
     if (state.tick % kAutosaveIntervalSeconds == 0) {
       debugPrint(
-        'tick=${state.tick} uur=${state.hourOfDay} '
+        'tick=${state.tick} uur=${formatGameClock(state.tick, kGameHourRealSeconds)} '
         'saldo=${state.balance.toStringAsFixed(2)} '
         'totaal=${state.totalEarned.toStringAsFixed(2)} '
-        'level=${state.playerLevel.name} '
-        'automaten=${state.atms.length} '
-        'cassettes=${state.atms.map((a) => a.notesInCassette).join('/')} '
-        'event=${state.activeEvent?.type.name ?? '-'}',
+        'automaten=${state.atms.length}',
       );
     }
 
     return MaterialApp(
       title: 'ATM Empire',
+      debugShowCheckedModeBanner: false,
+      theme: buildAppTheme(),
       home: Scaffold(
-        body: Center(
-          child: Text(
-            'ATM Empire fundament\n'
-            'tick ${state.tick}\n'
-            'saldo EUR ${state.balance.toStringAsFixed(2)}\n'
-            'totaal verdiend EUR ${state.totalEarned.toStringAsFixed(2)}\n'
-            'offline bijgeschreven EUR '
-            '${offline?.income.toStringAsFixed(2) ?? '0.00'}',
-            textAlign: TextAlign.center,
-          ),
+        body: Stack(
+          children: [
+            Column(
+              children: [
+                GameHeader(
+                  state: state,
+                  incomePerMinute: controller.incomePerMinute,
+                ),
+                Expanded(
+                  child: IndexedStack(
+                    index: _tabIndex,
+                    children: const [
+                      MapScreen(),
+                      UpgradesScreen(),
+                      FinanceScreen(),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            Positioned.fill(
+              child: CoinRainOverlay(feedback: controller.feedback),
+            ),
+            Align(
+              alignment: Alignment.bottomCenter,
+              child: FrostedTabBar(
+                index: _tabIndex,
+                brokenCount: brokenCount,
+                onSelect: (i) => setState(() => _tabIndex = i),
+              ),
+            ),
+          ],
         ),
       ),
     );

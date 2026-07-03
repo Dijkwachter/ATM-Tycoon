@@ -3,8 +3,10 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/constants.dart';
+import '../models/enums.dart';
 import '../models/game_state.dart';
 import '../persistence/save_repository.dart';
+import 'feedback.dart';
 import 'offline_calculator.dart';
 import 'tick_engine.dart';
 
@@ -33,13 +35,36 @@ final gameControllerProvider =
 class GameController extends Notifier<GameState> {
   Timer? _tickTimer;
   int _ticksSinceSave = 0;
+  final StreamController<GameFeedback> _feedback =
+      StreamController<GameFeedback>.broadcast();
 
-  /// Resultaat van de laatste offline-doorrekening, voor logging en later UI.
+  /// Feedback-events voor pills en muntenregen (GDD 10).
+  Stream<GameFeedback> get feedback => _feedback.stream;
+
+  /// Resultaat van de laatste offline-doorrekening, voor logging en UI.
   OfflineResult? lastOfflineResult;
+
+  /// Totaal-verdiend-monsters van de laatste 60 ticks, voor het inkomen
+  /// per minuut in de header (GDD 10).
+  final List<double> _earnedSamples = [];
+
+  /// Verdiend in de afgelopen minuut, in EUR. Groeit de eerste minuut mee
+  /// met het beschikbare venster.
+  double get incomePerMinute => _earnedSamples.isEmpty
+      ? 0
+      : state.totalEarned - _earnedSamples.first;
 
   @override
   GameState build() {
-    ref.onDispose(() => _tickTimer?.cancel());
+    ref.onDispose(() {
+      _tickTimer?.cancel();
+      unawaited(_feedback.close());
+    });
+    ref.read(tickEngineProvider).onFeedback = (event) {
+      if (!_feedback.isClosed) {
+        _feedback.add(event);
+      }
+    };
     final saved = ref.read(saveRepositoryProvider)?.load();
     if (saved == null) {
       return GameState.initial(nextEventInSeconds: _firstEventInterval());
@@ -63,6 +88,10 @@ class GameController extends Notifier<GameState> {
   }
 
   void _onTick() {
+    _earnedSamples.add(state.totalEarned);
+    if (_earnedSamples.length > 60) {
+      _earnedSamples.removeAt(0);
+    }
     state = ref.read(tickEngineProvider).tick(state);
     _ticksSinceSave += 1;
     if (_ticksSinceSave >= kAutosaveIntervalSeconds) {
@@ -88,6 +117,25 @@ class GameController extends Notifier<GameState> {
 
   void preventiveMaintenance(int atmId) =>
       _apply((e, s) => e.preventiveMaintenance(s, atmId));
+
+  void buyAtm(LocationType location) =>
+      _apply((e, s) => e.buyAtm(s, location));
+
+  void upgradeAtmTier(int atmId) =>
+      _apply((e, s) => e.upgradeAtmTier(s, atmId));
+
+  void buyUpgrade(UpgradeId id) => _apply((e, s) => e.buyUpgrade(s, id));
+
+  void hireStaff(StaffId id) => _apply((e, s) => e.hireStaff(s, id));
+
+  void negotiateBankContract(BankId id) =>
+      _apply((e, s) => e.negotiateBankContract(s, id));
+
+  void connectZuiderbank() => _apply((e, s) => e.connectZuiderbank(s));
+
+  /// Prestige; de verplichte dubbele tikbevestiging (GDD 9.3) is de
+  /// verantwoordelijkheid van de aanroepende UI.
+  void prestige() => _apply((e, s) => e.prestige(s));
 
   void _apply(GameState Function(TickEngine, GameState) action) {
     state = action(ref.read(tickEngineProvider), state);

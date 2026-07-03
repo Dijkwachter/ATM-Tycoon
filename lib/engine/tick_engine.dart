@@ -4,6 +4,7 @@ import '../core/constants.dart';
 import '../models/atm.dart';
 import '../models/enums.dart';
 import '../models/game_state.dart';
+import 'feedback.dart';
 
 /// De tick-engine voert de volledige spellogica uit, een tick per seconde.
 ///
@@ -11,9 +12,17 @@ import '../models/game_state.dart';
 /// alle tijd loopt via de tick-teller in [GameState], niet via de wandklok.
 /// Elke methode is puur: state in, nieuwe state uit.
 class TickEngine {
-  TickEngine({Random? random}) : random = random ?? Random();
+  TickEngine({Random? random, this.onFeedback}) : random = random ?? Random();
 
   final Random random;
+
+  /// Optionele afnemer van feedback-events voor de UI (pills en
+  /// muntenregen, GDD 10). Heeft geen invloed op de spellogica.
+  void Function(GameFeedback event)? onFeedback;
+
+  void _emit(FeedbackType type, double amount, {int? atmId}) {
+    onFeedback?.call(GameFeedback(type, amount, atmId: atmId));
+  }
 
   // ---------------------------------------------------------------------
   // De tick zelf.
@@ -103,10 +112,10 @@ class TickEngine {
         final target = s.atms[random.nextInt(s.atms.length)];
         final ibnsLevel = s.upgradeLevel(UpgradeId.ibns);
         if (ibnsLevel > 0) {
-          return _credit(
-            s,
-            kHeistInsuranceBase + kHeistInsurancePerIbnsLevel * ibnsLevel,
-          );
+          final payout =
+              kHeistInsuranceBase + kHeistInsurancePerIbnsLevel * ibnsLevel;
+          _emit(FeedbackType.insurance, payout, atmId: target.id);
+          return _credit(s, payout);
         }
         if (target.isBroken) {
           return s;
@@ -239,11 +248,14 @@ class TickEngine {
     var income =
         atm.incomePerTransaction * spread * bankRate * s.incomeMultiplier;
 
+    _emit(FeedbackType.income, income, atmId: atm.id);
+
     // DCC-bonus voor toeristen (GDD 3.1, Parameters!B20 tot B22).
     final dccChance =
         atm.isTouristLocation ? kDccChanceTourist : kDccChanceNormal;
     if (random.nextDouble() < dccChance) {
       income += kDccBonusEur;
+      _emit(FeedbackType.dcc, kDccBonusEur, atmId: atm.id);
     }
 
     s = _credit(s, income);
@@ -277,6 +289,7 @@ class TickEngine {
     final capacity = atm.capacity(s.upgradeLevel(UpgradeId.cassettes));
     final notes = kDepositNotesMin +
         random.nextInt(kDepositNotesMax - kDepositNotesMin + 1);
+    _emit(FeedbackType.recycling, kDepositFeeEur, atmId: atm.id);
     s = _credit(s, kDepositFeeEur);
     final updated = atm.copyWith(
       notesInCassette: min(capacity, atm.notesInCassette + notes),
@@ -336,6 +349,7 @@ class TickEngine {
     while (s.milestonesClaimed < kMilestoneThresholds.length &&
         s.totalEarned >= kMilestoneThresholds[s.milestonesClaimed]) {
       final reward = kMilestoneRewards[s.milestonesClaimed];
+      _emit(FeedbackType.milestone, reward);
       s = s.copyWith(
         balance: s.balance + reward,
         totalEarned: s.totalEarned + reward,
@@ -371,6 +385,7 @@ class TickEngine {
       return s.copyWith(refillGoalProgress: progress);
     }
     final reward = s.refillGoalReward;
+    _emit(FeedbackType.refillGoal, reward);
     s = s.copyWith(
       refillGoalRound: s.refillGoalRound + 1,
       refillGoalProgress: 0,

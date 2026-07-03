@@ -1,0 +1,136 @@
+import 'package:flutter/material.dart';
+
+import '../../core/constants.dart';
+import '../../models/game_state.dart';
+import '../format.dart';
+import '../theme.dart';
+import 'guilloche_painter.dart';
+import 'led_display.dart';
+
+/// De gele signatuur-header (GDD 10): gradient met guilloche-patroon,
+/// saldo als donker LED-display, spelklok en netto inkomen per minuut.
+class GameHeader extends StatelessWidget {
+  const GameHeader({
+    super.key,
+    required this.state,
+    required this.incomePerMinute,
+  });
+
+  final GameState state;
+  final double incomePerMinute;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: const BoxDecoration(
+        gradient: kHeaderGradient,
+        borderRadius: BorderRadius.vertical(bottom: Radius.circular(20)),
+        boxShadow: [
+          BoxShadow(
+            color: Color(0x33000000),
+            blurRadius: 8,
+            offset: Offset(0, 2),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius:
+            const BorderRadius.vertical(bottom: Radius.circular(20)),
+        child: CustomPaint(
+          painter: const GuillochePainter(),
+          child: SafeArea(
+            bottom: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'ATM EMPIRE',
+                        style: TextStyle(
+                          fontFamily: kTextFont,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 14,
+                          letterSpacing: 2,
+                          color: AppColors.ink.withValues(alpha: 0.8),
+                        ),
+                      ),
+                      _InfoChip(
+                        label: formatGameClock(
+                            state.tick, kGameHourRealSeconds),
+                        icon: Icons.schedule,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Center(
+                    child: LedDisplay(value: state.balance),
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      _InfoChip(
+                        label:
+                            '${formatEuroCompact(incomePerMinute)} per min',
+                        icon: Icons.trending_up,
+                      ),
+                      _InfoChip(
+                        label: 'Level ${_levelLabel(state)}',
+                        icon: Icons.flag_outlined,
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _levelLabel(GameState state) => switch (state.playerLevel.index) {
+        0 => 'Dorp',
+        1 => 'Stad',
+        2 => 'Regio',
+        _ => 'Landelijk',
+      };
+}
+
+class _InfoChip extends StatelessWidget {
+  const _InfoChip({required this.label, required this.icon});
+
+  final String label;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.45),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: AppColors.ink),
+          const SizedBox(width: 5),
+          Text(
+            label,
+            style: const TextStyle(
+              fontFamily: kDigitFont,
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              color: AppColors.ink,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
