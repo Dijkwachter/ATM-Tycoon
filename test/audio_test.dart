@@ -70,10 +70,7 @@ void main() {
 
     test('percussie komt op bij drukte', () {
       // Station om 17 uur zit in het spitsvenster (factor >= 1,2).
-      final busy = singleAtmState(
-        location: LocationType.station,
-        hour: 17,
-      );
+      final busy = singleAtmState(location: LocationType.station, hour: 17);
       expect(percussionLevelFor(busy), greaterThanOrEqualTo(0.35));
     });
   });

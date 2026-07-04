@@ -5,7 +5,6 @@
 // drukte en bij bijna lege cassettes.
 
 import '../core/constants.dart';
-import '../models/enums.dart';
 import '../models/game_state.dart';
 
 /// Hoogste druktefactor van de geplaatste automaten op dit speluur;
@@ -24,19 +23,15 @@ double peakBusyFactor(GameState state) {
   return peak;
 }
 
-/// Laagste cassettevulling (0,0 tot 1,0) van de werkende automaten;
+/// Laagste voorraadfractie (0,0 tot 1,0) van de werkende automaten;
 /// 1,0 wanneer er niets te melden valt.
 double lowestCassetteFraction(GameState state) {
   var lowest = 1.0;
   for (final atm in state.atms) {
-    if (!atm.isOperational) {
+    if (!atm.isOperational || atm.capacity <= 0) {
       continue;
     }
-    final capacity = atm.capacity(state.upgradeLevel(UpgradeId.cassettes));
-    if (capacity <= 0) {
-      continue;
-    }
-    final fraction = atm.notesInCassette / capacity;
+    final fraction = atm.availableNotes / atm.capacity;
     if (fraction < lowest) {
       lowest = fraction;
     }

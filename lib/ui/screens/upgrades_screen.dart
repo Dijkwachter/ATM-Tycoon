@@ -11,26 +11,22 @@ import '../widgets/tactile_button.dart';
 class UpgradesScreen extends ConsumerWidget {
   const UpgradesScreen({super.key});
 
+  /// De oude cassette-upgrade is vervangen door losse cassettes per
+  /// automaat (detailscherm); het enum-slot bestaat nog voor oude saves
+  /// maar de UI verbergt hem.
   static const _upgradeInfo = {
-    UpgradeId.cassettes: (
-      'Grotere cassettes',
-      '+40% capaciteit per level, minder ritten',
-    ),
     UpgradeId.ibns: (
       'Beveiliging (IBNS)',
       '-12% slijtage, -8% voorrijkosten, hogere plofkraak-uitkering',
     ),
     UpgradeId.citRoute: (
       'CIT routeoptimalisatie',
-      '-15% ritkosten per level',
+      '-15% ritkosten en reistijd per level',
     ),
   };
 
   static const _staffInfo = {
-    StaffId.mechanic: (
-      'Monteur Sven',
-      'Reparaties van 30 naar 12 seconden',
-    ),
+    StaffId.mechanic: ('Monteur Sven', 'Reparaties van 30 naar 12 seconden'),
     StaffId.citPlanner: (
       'CIT-planner Fatima',
       'Vult automatisch bij onder 15% cassette',
@@ -55,18 +51,20 @@ class UpgradesScreen extends ConsumerWidget {
       children: [
         const _SectionTitle('Netwerk-upgrades'),
         for (final id in UpgradeId.values)
-          _UpgradeCard(
-            title: _upgradeInfo[id]!.$1,
-            description: _upgradeInfo[id]!.$2,
-            level: state.upgradeLevel(id),
-            maxLevel: state.upgrade(id).maxLevel,
-            cost: state.upgrade(id).isMaxed
-                ? null
-                : state.upgrade(id).nextLevelCost,
-            affordable: !state.upgrade(id).isMaxed &&
-                state.balance >= state.upgrade(id).nextLevelCost,
-            onBuy: () => controller.buyUpgrade(id),
-          ),
+          if (_upgradeInfo.containsKey(id))
+            _UpgradeCard(
+              title: _upgradeInfo[id]!.$1,
+              description: _upgradeInfo[id]!.$2,
+              level: state.upgradeLevel(id),
+              maxLevel: state.upgrade(id).maxLevel,
+              cost: state.upgrade(id).isMaxed
+                  ? null
+                  : state.upgrade(id).nextLevelCost,
+              affordable:
+                  !state.upgrade(id).isMaxed &&
+                  state.balance >= state.upgrade(id).nextLevelCost,
+              onBuy: () => controller.buyUpgrade(id),
+            ),
         const _SectionTitle('Personeel'),
         for (final id in StaffId.values)
           _StaffCard(
@@ -246,8 +244,11 @@ class _StaffCard extends StatelessWidget {
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(Icons.check_circle,
-                              color: AppColors.incomePill, size: 18),
+                          Icon(
+                            Icons.check_circle,
+                            color: AppColors.incomePill,
+                            size: 18,
+                          ),
                           SizedBox(width: 4),
                           Text(
                             'In dienst',

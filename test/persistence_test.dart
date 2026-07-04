@@ -1,12 +1,21 @@
 import 'dart:io';
 
+import 'package:atm_empire/core/constants.dart';
 import 'package:atm_empire/models/atm.dart';
+import 'package:atm_empire/models/cassette.dart';
+import 'package:atm_empire/models/cit_van.dart';
 import 'package:atm_empire/models/enums.dart';
 import 'package:atm_empire/models/game_state.dart';
 import 'package:atm_empire/models/hive_adapters.dart';
 import 'package:atm_empire/persistence/save_repository.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive/hive.dart';
+// Alleen voor de migratietests: er bestaat geen publieke API om rauwe
+// legacy-bytes te bouwen, dus we gebruiken de interne writer en reader.
+// ignore: implementation_imports
+import 'package:hive/src/binary/binary_reader_impl.dart';
+// ignore: implementation_imports
+import 'package:hive/src/binary/binary_writer_impl.dart';
 
 import 'helpers/states.dart';
 
@@ -29,8 +38,6 @@ void main() {
     var state = singleAtmState(
       tier: AtmTier.ttwRecycler,
       location: LocationType.evenement,
-      notesInCassette: 123,
-      condition: 0.42,
       balance: 1234.56,
       totalEarned: 8888,
     );
@@ -39,10 +46,22 @@ void main() {
     state = state.copyWith(
       atms: [
         state.atms.first.copyWith(
-          repairSecondsRemaining: 7,
+          cassettes: const [
+            Cassette(notes: 77, condition: 0.42, repairSecondsRemaining: 7),
+            Cassette(notes: 46, condition: 0.9),
+          ],
           lifetimeEarned: 55.5,
         ),
         Atm.fresh(id: 9, location: LocationType.snelweg),
+      ],
+      citVans: const [
+        CitVan(id: 0),
+        CitVan(
+          id: 1,
+          status: CitVanStatus.transitToAtm,
+          targetAtmId: 9,
+          ticksRemaining: 12,
+        ),
       ],
       banks: [
         for (final b in state.banks)
@@ -83,10 +102,19 @@ void main() {
     expect(atm.id, 0);
     expect(atm.tier, AtmTier.ttwRecycler);
     expect(atm.location, LocationType.evenement);
-    expect(atm.notesInCassette, 123);
-    expect(atm.condition, 0.42);
-    expect(atm.repairSecondsRemaining, 7);
+    expect(atm.cassettes.length, 2);
+    expect(atm.cassettes.first.notes, 77);
+    expect(atm.cassettes.first.condition, 0.42);
+    expect(atm.cassettes.first.repairSecondsRemaining, 7);
+    expect(atm.cassettes.last.notes, 46);
+    expect(atm.cassettes.last.condition, 0.9);
     expect(atm.lifetimeEarned, 55.5);
+
+    expect(restored.citVans.length, 2);
+    expect(restored.citVans.first.isIdle, isTrue);
+    expect(restored.citVans.last.status, CitVanStatus.transitToAtm);
+    expect(restored.citVans.last.targetAtmId, 9);
+    expect(restored.citVans.last.ticksRemaining, 12);
 
     expect(restored.bank(BankId.zuider).connected, isTrue);
     expect(restored.bank(BankId.zuider).contractLevel, 2);
@@ -104,5 +132,98 @@ void main() {
     final box = await Hive.openBox<dynamic>('empty_box_test');
     final repository = SaveRepository(box);
     expect(repository.load(), isNull);
+  });
+
+  group('Migratie van oude saves (Ontwerper dd 2026-07-04)', () {
+    test('een legacy-automaat wordt over cassettes van 100 verdeeld', () {
+      // Het oude formaat: id, tier, locatie, biljetten, staat, reparatie,
+      // stroomstoring, verdiend - zonder sentinel.
+      final writer = BinaryWriterImpl(Hive);
+      writer
+        ..writeInt(4)
+        ..writeInt(AtmTier.ttwRecycler.index)
+        ..writeInt(LocationType.reizen.index)
+        ..writeInt(234)
+        ..writeDouble(0.66)
+        ..writeDouble(0.0)
+        ..writeDouble(3.0)
+        ..writeDouble(1234.5);
+
+      final atm = AtmAdapter().read(BinaryReaderImpl(writer.toBytes(), Hive));
+
+      expect(atm.id, 4);
+      expect(atm.tier, AtmTier.ttwRecycler);
+      expect(atm.location, LocationType.reizen);
+      // 234 biljetten worden 100 + 100 + 34: geen biljet verloren.
+      expect(atm.cassettes.length, 3);
+      expect([for (final c in atm.cassettes) c.notes], [100, 100, 34]);
+      expect(atm.cassettes.every((c) => c.condition == 0.66), isTrue);
+      expect(atm.totalNotes, 234);
+      expect(atm.outageSecondsRemaining, 3.0);
+      expect(atm.lifetimeEarned, 1234.5);
+    });
+
+    test('een lege legacy-automaat krijgt een lege cassette', () {
+      final writer = BinaryWriterImpl(Hive);
+      writer
+        ..writeInt(0)
+        ..writeInt(AtmTier.lobbyBasic.index)
+        ..writeInt(LocationType.winkel.index)
+        ..writeInt(0)
+        ..writeDouble(1.0)
+        ..writeDouble(0.0)
+        ..writeDouble(0.0)
+        ..writeDouble(0.0);
+
+      final atm = AtmAdapter().read(BinaryReaderImpl(writer.toBytes(), Hive));
+      expect(atm.cassettes.length, 1);
+      expect(atm.cassettes.single.notes, 0);
+    });
+
+    test('een legacy-storing geldt voor alle gemigreerde cassettes', () {
+      final writer = BinaryWriterImpl(Hive);
+      writer
+        ..writeInt(1)
+        ..writeInt(AtmTier.lobbyPlus.index)
+        ..writeInt(LocationType.station.index)
+        ..writeInt(150)
+        ..writeDouble(0.0)
+        ..writeDouble(21.0)
+        ..writeDouble(0.0)
+        ..writeDouble(9.9);
+
+      final atm = AtmAdapter().read(BinaryReaderImpl(writer.toBytes(), Hive));
+      expect(atm.cassettes.length, 2);
+      expect(atm.isBroken, isTrue);
+      expect(atm.repairSecondsRemaining, 21.0);
+    });
+
+    test('een GameState zonder vlootveld krijgt de startvloot', () {
+      // Het oude GameState-formaat eindigde na het actieve event; de
+      // vlootlijst is een staartveld.
+      final state = singleAtmState(balance: 777, totalEarned: 42);
+      final writer = BinaryWriterImpl(Hive);
+      writer
+        ..writeDouble(state.balance)
+        ..writeDouble(state.totalEarned)
+        ..writeList(state.atms)
+        ..writeList(state.banks)
+        ..writeList(state.upgrades)
+        ..writeList(state.staff)
+        ..writeInt(state.prestigeLevel)
+        ..writeInt(state.milestonesClaimed)
+        ..writeInt(state.refillGoalRound)
+        ..writeInt(state.refillGoalProgress)
+        ..writeInt(state.tick)
+        ..writeInt(state.nextEventInSeconds)
+        ..writeBool(false);
+
+      final migrated = GameStateAdapter().read(
+        BinaryReaderImpl(writer.toBytes(), Hive),
+      );
+      expect(migrated.balance, 777);
+      expect(migrated.citVans.length, kStartingCitVans);
+      expect(migrated.citVans.every((v) => v.isIdle), isTrue);
+    });
   });
 }

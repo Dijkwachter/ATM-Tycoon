@@ -6,13 +6,10 @@ import 'dart:math';
 /// vallen we terug op een neutrale default: nextDouble 0,999 (geen kans
 /// slaagt), nextBool false (1 biljet per transactie), nextInt 0.
 class FakeRandom implements Random {
-  FakeRandom({
-    List<double>? doubles,
-    List<bool>? bools,
-    List<int>? ints,
-  })  : doubles = List.of(doubles ?? const []),
-        bools = List.of(bools ?? const []),
-        ints = List.of(ints ?? const []);
+  FakeRandom({List<double>? doubles, List<bool>? bools, List<int>? ints})
+    : doubles = List.of(doubles ?? const []),
+      bools = List.of(bools ?? const []),
+      ints = List.of(ints ?? const []);
 
   final List<double> doubles;
   final List<bool> bools;

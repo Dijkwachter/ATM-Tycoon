@@ -23,6 +23,9 @@ enum FeedbackType {
 
   /// Een cassette is zojuist leeggetrokken: audio-sting en UI-signaal.
   cassetteEmpty,
+
+  /// Een CIT-wagen heeft een automaat gevuld en gerepareerd.
+  serviced,
 }
 
 class GameFeedback {

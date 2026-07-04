@@ -13,8 +13,9 @@ String formatEuro(double value, {int decimals = 2}) {
     buffer.write(digits[i]);
   }
   final whole = buffer.toString();
-  final result =
-      decimals > 0 && parts.length > 1 ? '$whole,${parts[1]}' : whole;
+  final result = decimals > 0 && parts.length > 1
+      ? '$whole,${parts[1]}'
+      : whole;
   return negative ? '-$result' : result;
 }
 

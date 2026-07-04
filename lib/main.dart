@@ -42,9 +42,7 @@ Future<void> main() async {
 
   runApp(
     ProviderScope(
-      overrides: [
-        saveRepositoryProvider.overrideWithValue(repository),
-      ],
+      overrides: [saveRepositoryProvider.overrideWithValue(repository)],
       child: const AtmEmpireApp(),
     ),
   );
@@ -123,7 +121,9 @@ class _AtmEmpireAppState extends ConsumerState<AtmEmpireApp>
     // Muziek volgt de spelstaat: tempo met de drukte, percussie bij
     // drukte en bijna lege cassettes.
     ref.listen(gameControllerProvider, (_, next) {
-      ref.read(gameAudioProvider).update(
+      ref
+          .read(gameAudioProvider)
+          .update(
             speed: musicSpeedFor(next),
             percussionLevel: percussionLevelFor(next),
           );
@@ -150,45 +150,45 @@ class _AtmEmpireAppState extends ConsumerState<AtmEmpireApp>
               onNewGame: () => _enterGame(fresh: true),
             )
           : Scaffold(
-        body: Stack(
-          children: [
-            Column(
-              children: [
-                GameHeader(
-                  state: state,
-                  incomePerMinute: controller.incomePerMinute,
-                  muted: _muted,
-                  onToggleMute: () {
-                    setState(() => _muted = !_muted);
-                    ref.read(gameAudioProvider).setMuted(_muted);
-                  },
-                ),
-                Expanded(
-                  child: IndexedStack(
-                    index: _tabIndex,
-                    children: const [
-                      MapScreen(),
-                      UpgradesScreen(),
-                      FinanceScreen(),
+              body: Stack(
+                children: [
+                  Column(
+                    children: [
+                      GameHeader(
+                        state: state,
+                        incomePerMinute: controller.incomePerMinute,
+                        muted: _muted,
+                        onToggleMute: () {
+                          setState(() => _muted = !_muted);
+                          ref.read(gameAudioProvider).setMuted(_muted);
+                        },
+                      ),
+                      Expanded(
+                        child: IndexedStack(
+                          index: _tabIndex,
+                          children: const [
+                            MapScreen(),
+                            UpgradesScreen(),
+                            FinanceScreen(),
+                          ],
+                        ),
+                      ),
                     ],
                   ),
-                ),
-              ],
-            ),
-            Positioned.fill(
-              child: CoinRainOverlay(feedback: controller.feedback),
-            ),
-            Align(
-              alignment: Alignment.bottomCenter,
-              child: FrostedTabBar(
-                index: _tabIndex,
-                brokenCount: brokenCount,
-                onSelect: (i) => setState(() => _tabIndex = i),
+                  Positioned.fill(
+                    child: CoinRainOverlay(feedback: controller.feedback),
+                  ),
+                  Align(
+                    alignment: Alignment.bottomCenter,
+                    child: FrostedTabBar(
+                      index: _tabIndex,
+                      brokenCount: brokenCount,
+                      onSelect: (i) => setState(() => _tabIndex = i),
+                    ),
+                  ),
+                ],
               ),
             ),
-          ],
-        ),
-      ),
     );
   }
 }

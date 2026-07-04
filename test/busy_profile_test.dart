@@ -4,8 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   group('Drukteprofielen (GDD 5)', () {
-    test('station heeft ochtend- en avondpiek, nachtdal en neutrale rest',
-        () {
+    test('station heeft ochtend- en avondpiek, nachtdal en neutrale rest', () {
       final profile = kBusyProfiles[LocationType.station]!;
       expect(profile.factorAt(8), 2.0);
       expect(profile.factorAt(17), 2.0);
@@ -43,8 +42,11 @@ void main() {
       for (final location in LocationType.values) {
         final profile = kBusyProfiles[location]!;
         for (var hour = 0; hour < kHoursPerDay; hour++) {
-          expect(profile.factorAt(hour), greaterThan(0),
-              reason: '$location om $hour uur');
+          expect(
+            profile.factorAt(hour),
+            greaterThan(0),
+            reason: '$location om $hour uur',
+          );
         }
         expect(profile.dayAverage, greaterThan(0));
       }

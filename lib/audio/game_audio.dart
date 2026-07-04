@@ -83,9 +83,7 @@ class GameAudio {
     _muted = value;
     unawaited(_music?.setVolume(value ? 0 : 0.5).catchError((_) {}));
     unawaited(
-      _percussion
-          ?.setVolume(value ? 0 : _lastPercussion)
-          .catchError((_) {}),
+      _percussion?.setVolume(value ? 0 : _lastPercussion).catchError((_) {}),
     );
   }
 

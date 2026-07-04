@@ -14,7 +14,7 @@ void main() {
           body: AtmTile(
             state: state,
             atm: state.atms.single,
-            onRefill: () {},
+            onService: () {},
             onRepairTap: () {},
             onMaintain: () {},
             onUpgrade: () {},
@@ -24,8 +24,9 @@ void main() {
     );
   }
 
-  testWidgets('lobby basic: geen contactless, camera of stortsleuf',
-      (tester) async {
+  testWidgets('lobby basic: geen contactless, camera of stortsleuf', (
+    tester,
+  ) async {
     await pumpTile(tester, AtmTier.lobbyBasic);
 
     expect(find.textContaining('Lobby basic'), findsOneWidget);
@@ -33,8 +34,9 @@ void main() {
     expect(find.text('STORT'), findsNothing);
   });
 
-  testWidgets('lobby plus: contactless erbij, nog geen stortsleuf',
-      (tester) async {
+  testWidgets('lobby plus: contactless erbij, nog geen stortsleuf', (
+    tester,
+  ) async {
     await pumpTile(tester, AtmTier.lobbyPlus);
 
     expect(find.textContaining('Lobby plus'), findsOneWidget);

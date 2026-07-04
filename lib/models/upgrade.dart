@@ -14,22 +14,23 @@ class Upgrade {
   final int level;
 
   double get basePrice => switch (id) {
-        UpgradeId.cassettes => kCassetteUpgradeBasePrice,
-        UpgradeId.ibns => kIbnsUpgradeBasePrice,
-        UpgradeId.citRoute => kCitRouteUpgradeBasePrice,
-      };
+    // Vervallen slot: niet meer koopbaar (maxLevel 0).
+    UpgradeId.cassettes => 0,
+    UpgradeId.ibns => kIbnsUpgradeBasePrice,
+    UpgradeId.citRoute => kCitRouteUpgradeBasePrice,
+  };
 
   double get growthFactor => switch (id) {
-        UpgradeId.cassettes => kCassetteUpgradeGrowth,
-        UpgradeId.ibns => kIbnsUpgradeGrowth,
-        UpgradeId.citRoute => kCitRouteUpgradeGrowth,
-      };
+    UpgradeId.cassettes => 1,
+    UpgradeId.ibns => kIbnsUpgradeGrowth,
+    UpgradeId.citRoute => kCitRouteUpgradeGrowth,
+  };
 
   int get maxLevel => switch (id) {
-        UpgradeId.cassettes => kCassetteUpgradeMaxLevel,
-        UpgradeId.ibns => kIbnsUpgradeMaxLevel,
-        UpgradeId.citRoute => kCitRouteUpgradeMaxLevel,
-      };
+    UpgradeId.cassettes => 0,
+    UpgradeId.ibns => kIbnsUpgradeMaxLevel,
+    UpgradeId.citRoute => kCitRouteUpgradeMaxLevel,
+  };
 
   bool get isMaxed => level >= maxLevel;
 

@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/constants.dart';
 import '../../engine/game_controller.dart';
+import '../../models/cit_van.dart';
 import '../../models/enums.dart';
 import '../../models/game_state.dart';
 import '../format.dart';
@@ -23,6 +24,21 @@ class FinanceScreen extends ConsumerWidget {
     BankId.zuider: 'Zuiderbank',
   };
 
+  static const _shortLocationNames = {
+    LocationType.station: 'Station',
+    LocationType.winkel: 'Winkel',
+    LocationType.winkelcentrum: 'Centrum',
+    LocationType.horeca: 'Horeca',
+    LocationType.evenement: 'Stadion',
+    LocationType.reizen: 'Luchthaven',
+    LocationType.zorg: 'Zorg',
+    LocationType.snelweg: 'Snelweg',
+    LocationType.openbaar: 'Openbaar',
+  };
+
+  static String _shortLocation(LocationType location) =>
+      _shortLocationNames[location]!;
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final state = ref.watch(gameControllerProvider);
@@ -32,6 +48,8 @@ class FinanceScreen extends ConsumerWidget {
       padding: const EdgeInsets.only(top: 8, bottom: 96),
       children: [
         _OverviewCard(state: state),
+        const _SectionTitle('CIT-vloot'),
+        _FleetCard(state: state, onBuyVan: controller.buyCitVan),
         const _SectionTitle('Banken en contracten'),
         for (final id in BankId.values)
           _BankCard(
@@ -87,12 +105,16 @@ class _OverviewCard extends StatelessWidget {
           children: [
             _row('Saldo', 'EUR ${formatEuro(state.balance)}'),
             _row('Totaal verdiend', 'EUR ${formatEuro(state.totalEarned)}'),
-            _row('Cash in cassettes (float)',
-                'EUR ${formatEuro(state.totalFloatValue, decimals: 0)}'),
+            _row(
+              'Cash in cassettes (float)',
+              'EUR ${formatEuro(state.totalFloatValue, decimals: 0)}',
+            ),
             _row('CIT-rit', 'EUR ${formatEuroCompact(state.citTripCost)}'),
             if (state.prestigeLevel > 0)
-              _row('Prestigebonus',
-                  '+${(state.prestigeLevel * kPrestigeBonusPerLevel * 100).round()}%'),
+              _row(
+                'Prestigebonus',
+                '+${(state.prestigeLevel * kPrestigeBonusPerLevel * 100).round()}%',
+              ),
           ],
         ),
       ),
@@ -114,6 +136,90 @@ class _OverviewCard extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Vlootbeheer (Ontwerper dd 2026-07-04): per geldwagen de status, plus de
+/// koopknop voor een extra wagen. Zijn alle wagens onderweg, dan kan er
+/// nergens acuut geserviced worden - dat is precies de spanning.
+class _FleetCard extends StatelessWidget {
+  const _FleetCard({required this.state, required this.onBuyVan});
+
+  final GameState state;
+  final VoidCallback onBuyVan;
+
+  String _vanStatus(CitVan van) {
+    final target = state.atms.where((a) => a.id == van.targetAtmId).firstOrNull;
+    final where = target == null
+        ? ''
+        : ' - ${FinanceScreen._shortLocation(target.location)}';
+    return switch (van.status) {
+      CitVanStatus.idle => 'stand-by bij het depot',
+      CitVanStatus.transitToAtm => 'onderweg$where (${van.ticksRemaining}s)',
+      CitVanStatus.servicing => 'servicing$where (${van.ticksRemaining}s)',
+      CitVanStatus.returning => 'terugreis (${van.ticksRemaining}s)',
+    };
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final fleetFull = state.citVans.length >= kMaxCitVans;
+    final affordable = state.balance >= state.nextCitVanPrice;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            for (final van in state.citVans)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 3),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.local_shipping_outlined,
+                      size: 18,
+                      color: van.isIdle
+                          ? AppColors.incomePill
+                          : AppColors.ink.withValues(alpha: 0.6),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Wagen ${van.id + 1}',
+                      style: const TextStyle(
+                        fontFamily: kTextFont,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 13,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        _vanStatus(van),
+                        textAlign: TextAlign.right,
+                        style: TextStyle(
+                          fontFamily: kDigitFont,
+                          fontSize: 11.5,
+                          color: AppColors.ink.withValues(alpha: 0.7),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            const SizedBox(height: 8),
+            TactileButton(
+              label: fleetFull ? 'Vloot compleet' : 'Koop geldwagen',
+              sublabel: fleetFull
+                  ? '$kMaxCitVans wagens'
+                  : formatEuroCompact(state.nextCitVanPrice),
+              color: AppColors.serviceButton,
+              onPressed: !fleetFull && affordable ? onBuyVan : null,
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -143,7 +249,7 @@ class _BankCard extends StatelessWidget {
     if (!bank.connected) {
       final unlockable =
           state.playerLevel.index >= PlayerLevel.regio.index &&
-              state.balance >= kZuiderbankUnlockCost;
+          state.balance >= kZuiderbankUnlockCost;
       action = TactileButton(
         label: 'Sluit aan',
         sublabel: formatEuroCompact(kZuiderbankUnlockCost),
@@ -162,10 +268,7 @@ class _BankCard extends StatelessWidget {
       action = const Text(
         'Max',
         textAlign: TextAlign.center,
-        style: TextStyle(
-          fontFamily: kTextFont,
-          fontWeight: FontWeight.w700,
-        ),
+        style: TextStyle(fontFamily: kTextFont, fontWeight: FontWeight.w700),
       );
     }
 
@@ -190,8 +293,8 @@ class _BankCard extends StatelessWidget {
                   Text(
                     bank.connected
                         ? 'aandeel ${((share ?? 0) * 100).round()}% - tarief '
-                            'x${bank.effectiveRate.toStringAsFixed(2)} - '
-                            'level ${bank.contractLevel}'
+                              'x${bank.effectiveRate.toStringAsFixed(2)} - '
+                              'level ${bank.contractLevel}'
                         : 'nog niet aangesloten - unlock vanaf level Regio',
                     style: TextStyle(
                       fontFamily: kDigitFont,
@@ -219,11 +322,11 @@ class _MilestoneCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final done = state.milestonesClaimed >= kMilestoneThresholds.length;
-    final target =
-        done ? null : kMilestoneThresholds[state.milestonesClaimed];
+    final target = done ? null : kMilestoneThresholds[state.milestonesClaimed];
     final reward = done ? null : kMilestoneRewards[state.milestonesClaimed];
-    final progress =
-        target == null ? 1.0 : (state.totalEarned / target).clamp(0.0, 1.0);
+    final progress = target == null
+        ? 1.0
+        : (state.totalEarned / target).clamp(0.0, 1.0);
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(12),
@@ -244,7 +347,7 @@ class _MilestoneCard extends StatelessWidget {
                   done
                       ? 'alle mijlpalen gehaald'
                       : '${formatEuroCompact(target!)} '
-                          '(+${formatEuroCompact(reward!)})',
+                            '(+${formatEuroCompact(reward!)})',
                   style: const TextStyle(
                     fontFamily: kDigitFont,
                     fontWeight: FontWeight.w700,
@@ -261,7 +364,8 @@ class _MilestoneCard extends StatelessWidget {
                 minHeight: 8,
                 backgroundColor: AppColors.ink.withValues(alpha: 0.12),
                 valueColor: const AlwaysStoppedAnimation<Color>(
-                    AppColors.gradientBottom),
+                  AppColors.gradientBottom,
+                ),
               ),
             ),
           ],
@@ -349,8 +453,10 @@ class _PrestigeCardState extends State<_PrestigeCard> {
   @override
   Widget build(BuildContext context) {
     final unlocked = widget.state.totalEarned >= kPrestigeThreshold;
-    final progress =
-        (widget.state.totalEarned / kPrestigeThreshold).clamp(0.0, 1.0);
+    final progress = (widget.state.totalEarned / kPrestigeThreshold).clamp(
+      0.0,
+      1.0,
+    );
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(12),
@@ -376,7 +482,8 @@ class _PrestigeCardState extends State<_PrestigeCard> {
                 minHeight: 8,
                 backgroundColor: AppColors.ink.withValues(alpha: 0.12),
                 valueColor: const AlwaysStoppedAnimation<Color>(
-                    AppColors.recyclingPill),
+                  AppColors.recyclingPill,
+                ),
               ),
             ),
             const SizedBox(height: 10),
@@ -387,7 +494,7 @@ class _PrestigeCardState extends State<_PrestigeCard> {
               sublabel: unlocked
                   ? null
                   : 'vanaf ${formatEuroCompact(kPrestigeThreshold)} '
-                      'totaal verdiend',
+                        'totaal verdiend',
               color: _armed ? AppColors.warning : AppColors.recyclingPill,
               onPressed: unlocked ? _tap : null,
             ),

@@ -11,10 +11,10 @@ class EventBanner extends StatelessWidget {
   final ActiveEvent event;
 
   String get _label => switch (event.type) {
-        GameEventType.kingsday => 'Koningsdag: dubbele drukte overal!',
-        GameEventType.festival => 'Festivalweekend: drukte x3!',
-        _ => 'Event actief',
-      };
+    GameEventType.kingsday => 'Koningsdag: dubbele drukte overal!',
+    GameEventType.festival => 'Festivalweekend: drukte x3!',
+    _ => 'Event actief',
+  };
 
   @override
   Widget build(BuildContext context) {
@@ -27,8 +27,11 @@ class EventBanner extends StatelessWidget {
       ),
       child: Row(
         children: [
-          const Icon(Icons.celebration_outlined,
-              size: 18, color: AppColors.ledGlow),
+          const Icon(
+            Icons.celebration_outlined,
+            size: 18,
+            color: AppColors.ledGlow,
+          ),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
@@ -43,10 +46,7 @@ class EventBanner extends StatelessWidget {
               ),
             ),
           ),
-          Text(
-            '${event.secondsRemaining}s',
-            style: ledDigits(14),
-          ),
+          Text('${event.secondsRemaining}s', style: ledDigits(14)),
         ],
       ),
     );

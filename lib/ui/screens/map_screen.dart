@@ -11,6 +11,7 @@ import '../format.dart';
 import '../theme.dart';
 import '../widgets/atm_tile.dart';
 import '../widgets/event_banner.dart';
+import '../widgets/land_map.dart';
 import '../widgets/pill_overlay.dart';
 import '../widgets/tactile_button.dart';
 
@@ -40,8 +41,7 @@ class MapScreen extends ConsumerWidget {
     return ListView(
       padding: const EdgeInsets.only(top: 4, bottom: 96),
       children: [
-        if (state.activeEvent != null)
-          EventBanner(event: state.activeEvent!),
+        if (state.activeEvent != null) EventBanner(event: state.activeEvent!),
         if (state.atms.isEmpty)
           Container(
             margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -65,7 +65,7 @@ class MapScreen extends ConsumerWidget {
           AtmTile(
             state: state,
             atm: atm,
-            onRefill: () => controller.refillAtm(atm.id),
+            onService: () => controller.requestService(atm.id),
             onRepairTap: () => controller.tapRepair(atm.id),
             onMaintain: () => controller.preventiveMaintenance(atm.id),
             onUpgrade: () => controller.upgradeAtmTier(atm.id),
@@ -85,6 +85,7 @@ class MapScreen extends ConsumerWidget {
       context: context,
       backgroundColor: Colors.transparent,
       barrierColor: Colors.black26,
+      isScrollControlled: true,
       builder: (_) => BackdropFilter(
         filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
         child: _AtmDetailSheet(atmId: atmId),
@@ -92,16 +93,21 @@ class MapScreen extends ConsumerWidget {
     );
   }
 
+  /// Koopflow via de landkaart (Ontwerper dd 2026-07-04): tik op een
+  /// locatie in een open zone om daar te bouwen; zones die de Nationale
+  /// Bank blokkeert (spreidingswet) kleuren rood met een slot.
   void _showLocationPicker(BuildContext context, WidgetRef ref) {
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: AppColors.background,
+      isScrollControlled: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
       ),
       builder: (_) => Consumer(
         builder: (context, ref, _) {
           final state = ref.watch(gameControllerProvider);
+          final approval = (state.spreadApproval * 100).round();
           return SafeArea(
             child: ListView(
               shrinkWrap: true,
@@ -117,18 +123,29 @@ class MapScreen extends ConsumerWidget {
                     fontSize: 16,
                   ),
                 ),
-                const SizedBox(height: 8),
-                for (final location in LocationType.values)
-                  _LocationRow(
-                    location: location,
-                    state: state,
-                    onPick: () {
-                      ref
-                          .read(gameControllerProvider.notifier)
-                          .buyAtm(location);
-                      Navigator.of(context).pop();
-                    },
+                const SizedBox(height: 4),
+                Text(
+                  'Nationale Bank spreidingsscore: $approval%',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontFamily: kDigitFont,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: approval < 50
+                        ? AppColors.warning
+                        : AppColors.ink.withValues(alpha: 0.7),
                   ),
+                ),
+                const SizedBox(height: 8),
+                LandMap(
+                  state: state,
+                  onPickLocation: (location) {
+                    ref.read(gameControllerProvider.notifier).buyAtm(location);
+                    Navigator.of(context).pop();
+                  },
+                ),
+                const SizedBox(height: 8),
+                _PickerBusyHint(state: state),
               ],
             ),
           );
@@ -138,41 +155,35 @@ class MapScreen extends ConsumerWidget {
   }
 }
 
-class _LocationRow extends StatelessWidget {
-  const _LocationRow({
-    required this.location,
-    required this.state,
-    required this.onPick,
-  });
+/// Compacte druktehint onder de kaart: welke locaties nu druk of rustig
+/// zijn (GDD 5), zodat de kaart zelf schoon blijft.
+class _PickerBusyHint extends StatelessWidget {
+  const _PickerBusyHint({required this.state});
 
-  final LocationType location;
   final GameState state;
-  final VoidCallback onPick;
 
   @override
   Widget build(BuildContext context) {
-    final profile = kBusyProfiles[location]!;
-    final factor = profile.factorAt(state.hourOfDay);
-    final busyLabel = factor >= 1.2
-        ? 'druk'
-        : factor <= 0.5
-            ? 'rustig'
-            : 'normaal';
-    return Card(
-      child: ListTile(
-        onTap: onPick,
-        title: Text(
-          MapScreen.locationNames[location]!,
-          style: const TextStyle(
-              fontFamily: kTextFont, fontWeight: FontWeight.w700),
-        ),
-        subtitle: Text(
-          'nu $busyLabel - gemiddeld x'
-          '${profile.dayAverage.toStringAsFixed(2)}',
-          style: const TextStyle(fontFamily: kDigitFont, fontSize: 12),
-        ),
-        trailing: const Icon(Icons.add_business_outlined,
-            color: AppColors.ink),
+    final busy = <String>[];
+    final quiet = <String>[];
+    for (final location in LocationType.values) {
+      final factor = kBusyProfiles[location]!.factorAt(state.hourOfDay);
+      if (factor >= 1.2) {
+        busy.add(LandMap.shortLocationNames[location]!);
+      } else if (factor <= 0.5) {
+        quiet.add(LandMap.shortLocationNames[location]!);
+      }
+    }
+    return Text(
+      [
+        if (busy.isNotEmpty) 'Nu druk: ${busy.join(', ')}',
+        if (quiet.isNotEmpty) 'rustig: ${quiet.join(', ')}',
+      ].join(' - '),
+      textAlign: TextAlign.center,
+      style: TextStyle(
+        fontFamily: kTextFont,
+        fontSize: 11.5,
+        color: AppColors.ink.withValues(alpha: 0.7),
       ),
     );
   }
@@ -224,7 +235,9 @@ class _BuyAtmCard extends StatelessWidget {
   }
 }
 
-/// Detail-sheet met de detailcijfers van een automaat (GDD 10).
+/// Detail-sheet met de detailcijfers van een automaat (GDD 10) en het
+/// cassettebeheer: losse slots met elk hun vulling en staat, plus de
+/// koopknop voor een extra cassette (Ontwerper dd 2026-07-04).
 class _AtmDetailSheet extends ConsumerWidget {
   const _AtmDetailSheet({required this.atmId});
 
@@ -237,8 +250,9 @@ class _AtmDetailSheet extends ConsumerWidget {
     if (atm == null) {
       return const SizedBox.shrink();
     }
-    final capacity = atm.capacity(state.upgradeLevel(UpgradeId.cassettes));
     final profile = kBusyProfiles[atm.location]!;
+    final slotsFree = atm.cassettes.length < kMaxCassettesPerAtm;
+    final canBuyCassette = slotsFree && state.balance >= kExtraCassettePrice;
     return Container(
       decoration: const BoxDecoration(
         color: AppColors.background,
@@ -246,39 +260,77 @@ class _AtmDetailSheet extends ConsumerWidget {
       ),
       padding: const EdgeInsets.all(16),
       child: SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(
-              MapScreen.locationNames[atm.location]!,
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontFamily: kTextFont,
-                fontWeight: FontWeight.w700,
-                fontSize: 18,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                MapScreen.locationNames[atm.location]!,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontFamily: kTextFont,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 18,
+                ),
               ),
-            ),
-            const SizedBox(height: 12),
-            _detailRow('Inkomen per transactie',
-                'EUR ${formatEuro(atm.incomePerTransaction)}'),
-            _detailRow(
-              'Cassette',
-              '${formatEuro((atm.notesInCassette * kNotesPerUnit).toDouble(), decimals: 0)}'
-              ' van '
-              '${formatEuro((capacity * kNotesPerUnit).toDouble(), decimals: 0)}'
-              ' biljetten',
-            ),
-            _detailRow('Staat', '${(atm.condition * 100).round()}%'),
-            _detailRow('Totaal verdiend',
-                'EUR ${formatEuro(atm.lifetimeEarned)}'),
-            _detailRow('Druktefactor nu',
-                'x${profile.factorAt(state.hourOfDay).toStringAsFixed(2)}'),
-            _detailRow('Etmaalgemiddelde',
-                'x${profile.dayAverage.toStringAsFixed(2)}'),
-            if (atm.tier.isRecycler)
-              _detailRow('Recycler', 'accepteert stortingen'),
-          ],
+              const SizedBox(height: 12),
+              _detailRow(
+                'Inkomen per transactie',
+                'EUR ${formatEuro(atm.incomePerTransaction)}',
+              ),
+              _detailRow(
+                'Cassette',
+                '${formatEuro((atm.availableNotes * kNotesPerUnit).toDouble(), decimals: 0)}'
+                    ' van '
+                    '${formatEuro((atm.capacity * kNotesPerUnit).toDouble(), decimals: 0)}'
+                    ' biljetten',
+              ),
+              _detailRow('Staat', '${(atm.condition * 100).round()}%'),
+              _detailRow(
+                'Totaal verdiend',
+                'EUR ${formatEuro(atm.lifetimeEarned)}',
+              ),
+              _detailRow(
+                'Druktefactor nu',
+                'x${profile.factorAt(state.hourOfDay).toStringAsFixed(2)}',
+              ),
+              _detailRow(
+                'Etmaalgemiddelde',
+                'x${profile.dayAverage.toStringAsFixed(2)}',
+              ),
+              if (atm.tier.isRecycler)
+                _detailRow('Recycler', 'accepteert stortingen'),
+              const SizedBox(height: 10),
+              for (var i = 0; i < atm.cassettes.length; i++)
+                _detailRow(
+                  'Slot ${i + 1}',
+                  atm.cassettes[i].isBroken
+                      ? 'storing '
+                            '${atm.cassettes[i].repairSecondsRemaining.ceil()}s'
+                      : '${formatEuro((atm.cassettes[i].notes * kNotesPerUnit).toDouble(), decimals: 0)}'
+                            ' biljetten - staat '
+                            '${(atm.cassettes[i].condition * 100).round()}%',
+                ),
+              const SizedBox(height: 10),
+              TactileButton(
+                label:
+                    'Extra cassette '
+                    '(${atm.cassettes.length} van $kMaxCassettesPerAtm)',
+                sublabel: slotsFree
+                    ? '${formatEuroCompact(kExtraCassettePrice)} - '
+                          'leeg geleverd'
+                    : 'alle slots bezet',
+                color: AppColors.gradientBottom,
+                textColor: AppColors.ink,
+                onPressed: canBuyCassette
+                    ? () => ref
+                          .read(gameControllerProvider.notifier)
+                          .buyCassette(atmId)
+                    : null,
+              ),
+            ],
+          ),
         ),
       ),
     );

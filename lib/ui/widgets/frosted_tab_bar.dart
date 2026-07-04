@@ -35,8 +35,12 @@ class FrostedTabBar extends StatelessWidget {
           ),
           child: Row(
             children: [
-              _tab(0, 'Kaart', 'assets/icons/tab_kaart.svg',
-                  badge: brokenCount),
+              _tab(
+                0,
+                'Kaart',
+                'assets/icons/tab_kaart.svg',
+                badge: brokenCount,
+              ),
               _tab(1, 'Upgrades', 'assets/icons/tab_upgrades.svg'),
               _tab(2, 'Financien', 'assets/icons/tab_financien.svg'),
             ],
@@ -72,7 +76,9 @@ class FrostedTabBar extends StatelessWidget {
                     top: -4,
                     child: Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 5, vertical: 1),
+                        horizontal: 5,
+                        vertical: 1,
+                      ),
                       decoration: BoxDecoration(
                         color: AppColors.warning,
                         borderRadius: BorderRadius.circular(9),
@@ -96,8 +102,7 @@ class FrostedTabBar extends StatelessWidget {
               style: TextStyle(
                 fontFamily: kTextFont,
                 fontSize: 11,
-                fontWeight:
-                    selected ? FontWeight.w700 : FontWeight.w400,
+                fontWeight: selected ? FontWeight.w700 : FontWeight.w400,
                 color: color,
               ),
             ),

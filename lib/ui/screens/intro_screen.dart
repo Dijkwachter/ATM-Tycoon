@@ -70,8 +70,9 @@ class IntroScreen extends StatelessWidget {
               width: double.infinity,
               decoration: const BoxDecoration(
                 gradient: kHeaderGradient,
-                borderRadius:
-                    BorderRadius.vertical(bottom: Radius.circular(28)),
+                borderRadius: BorderRadius.vertical(
+                  bottom: Radius.circular(28),
+                ),
                 boxShadow: [
                   BoxShadow(
                     color: Color(0x33000000),
@@ -81,8 +82,9 @@ class IntroScreen extends StatelessWidget {
                 ],
               ),
               child: ClipRRect(
-                borderRadius:
-                    const BorderRadius.vertical(bottom: Radius.circular(28)),
+                borderRadius: const BorderRadius.vertical(
+                  bottom: Radius.circular(28),
+                ),
                 child: CustomPaint(
                   painter: const GuillochePainter(),
                   child: SafeArea(

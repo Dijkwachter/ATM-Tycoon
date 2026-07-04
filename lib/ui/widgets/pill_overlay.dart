@@ -10,11 +10,7 @@ import '../theme.dart';
 /// inkomsten, blauw voor DCC, paars voor recycling. Pills stijgen op en
 /// vervagen; met reduced motion staan ze stil en verdwijnen ze alleen.
 class PillOverlay extends StatefulWidget {
-  const PillOverlay({
-    super.key,
-    required this.feedback,
-    required this.atmId,
-  });
+  const PillOverlay({super.key, required this.feedback, required this.atmId});
 
   final Stream<GameFeedback> feedback;
   final int atmId;
@@ -112,10 +108,10 @@ class _PillChip extends StatelessWidget {
   final GameFeedback event;
 
   Color get _color => switch (event.type) {
-        FeedbackType.dcc => AppColors.dccPill,
-        FeedbackType.recycling => AppColors.recyclingPill,
-        _ => AppColors.incomePill,
-      };
+    FeedbackType.dcc => AppColors.dccPill,
+    FeedbackType.recycling => AppColors.recyclingPill,
+    _ => AppColors.incomePill,
+  };
 
   @override
   Widget build(BuildContext context) {

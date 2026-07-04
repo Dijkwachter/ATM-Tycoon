@@ -31,40 +31,32 @@ enum LocationType {
 
 /// De vier banken. Zuiderbank moet eerst aangesloten worden.
 /// Bron: GDD 8 tabel Banken.
-enum BankId {
-  oranje,
-  rivier,
-  noorder,
-  zuider,
-}
+enum BankId { oranje, rivier, noorder, zuider }
 
 /// Netwerk-upgrades. Bron: GDD 7.1 tabel Upgrades.
 enum UpgradeId {
+  /// Vervallen slot: de oude capaciteitsupgrade is vervangen door losse
+  /// cassettes per automaat (Ontwerper dd 2026-07-04). De enum-index blijft
+  /// staan omdat oude saves de index serialiseren; de UI verbergt hem en de
+  /// engine negeert het level.
   cassettes,
   ibns,
   citRoute,
 }
 
 /// Personeel. Bron: GDD 7.2 tabel Medewerkers.
-enum StaffId {
-  mechanic,
-  citPlanner,
-  analyst,
-  regionalManager,
-}
+enum StaffId { mechanic, citPlanner, analyst, regionalManager }
 
 /// Random events. Bron: GDD 6 tabel Events.
-enum GameEventType {
-  kingsday,
-  festival,
-  heistAttempt,
-  powerOutage,
-}
+enum GameEventType { kingsday, festival, heistAttempt, powerOutage }
 
 /// Spelerslevels op totaal verdiend. Bron: GDD 9.1 tabel Levels.
-enum PlayerLevel {
-  dorp,
-  stad,
-  regio,
-  landelijk,
-}
+enum PlayerLevel { dorp, stad, regio, landelijk }
+
+/// Zones van de landkaart, elk een kwadrant met eigen locaties en
+/// CIT-reistijd (Ontwerper dd 2026-07-04).
+enum MapZone { dorp, stad, regio, landelijk }
+
+/// Status van een CIT-geldwagen (Ontwerper dd 2026-07-04): pas als de
+/// wagen terug is bij het depot is hij weer inzetbaar.
+enum CitVanStatus { idle, transitToAtm, servicing, returning }

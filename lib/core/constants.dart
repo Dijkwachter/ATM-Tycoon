@@ -92,6 +92,43 @@ const double kHundredEuroNoteDrainMultiplier = 1.4;
 /// Bron: Parameters!B18.
 const double kCitCostPerTrip = 60;
 
+// ---------------------------------------------------------------------------
+// Multi-cassette. Bron: Ontwerper dd 2026-07-04 ("Van enkele cassette naar
+// multi-cassette slots").
+// ---------------------------------------------------------------------------
+
+/// Vaste capaciteit van een cassette in engine-eenheden. Met [kNotesPerUnit]
+/// (20) komt dit overeen met de 2.000 echte biljetten uit het ontwerp.
+const int kCassetteCapacityUnits = 100;
+
+/// Maximaal aantal cassetteslots per automaat.
+const int kMaxCassettesPerAtm = 5;
+
+/// Vaste prijs van een extra cassette (leeg geleverd; een CIT-rit vult hem).
+/// Bron: Ontwerper dd 2026-07-04.
+const double kExtraCassettePrice = 500;
+
+// ---------------------------------------------------------------------------
+// CIT-vloot en reistijden. Bron: Ontwerper dd 2026-07-04 ("Logistiek &
+// Dynamic CIT Management").
+// ---------------------------------------------------------------------------
+
+/// Aantal geldwagens waarmee een vers spel start.
+const int kStartingCitVans = 1;
+
+/// Maximale vlootomvang.
+const int kMaxCitVans = 5;
+
+/// Prijs van de tweede geldwagen; daarna exponentieel via
+/// [kCitVanPriceGrowth].
+const double kCitVanBasePrice = 1500;
+
+/// Prijsgroeifactor per extra geldwagen.
+const double kCitVanPriceGrowth = 2.0;
+
+/// Duur van het vullen en repareren ter plaatse, in ticks.
+const int kServicingDurationTicks = 3;
+
 /// DCC-bonus in EUR bovenop een toerist-transactie. Bron: Parameters!B20.
 const double kDccBonusEur = 4;
 
@@ -218,15 +255,16 @@ class BusyProfile {
 /// [kDefaultBusyFactor], bevestigd door Ontwerper dd 2026-07-02.
 const Map<LocationType, BusyProfile> kBusyProfiles = {
   // Station: piek 07-10 en 16-19 factor 2,0; dal 01-05 factor 0,2.
-  LocationType.station: BusyProfile(
-    [BusyWindow(7, 10, 2.0), BusyWindow(16, 19, 2.0), BusyWindow(1, 5, 0.2)],
-    kDefaultBusyFactor,
-  ),
+  LocationType.station: BusyProfile([
+    BusyWindow(7, 10, 2.0),
+    BusyWindow(16, 19, 2.0),
+    BusyWindow(1, 5, 0.2),
+  ], kDefaultBusyFactor),
   // Winkel: piek 09-18 factor 1,4; dal 21-09 factor 0,15.
-  LocationType.winkel: BusyProfile(
-    [BusyWindow(9, 18, 1.4), BusyWindow(21, 9, 0.15)],
-    kDefaultBusyFactor,
-  ),
+  LocationType.winkel: BusyProfile([
+    BusyWindow(9, 18, 1.4),
+    BusyWindow(21, 9, 0.15),
+  ], kDefaultBusyFactor),
   // Winkelcentrum: piek 10-21 factor 1,5; nacht factor 0,15.
   LocationType.winkelcentrum: BusyProfile([BusyWindow(10, 21, 1.5)], 0.15),
   // Horeca / casino: piek 17-02 factor 1,8; overdag factor 0,4.
@@ -251,6 +289,63 @@ const Set<LocationType> kTouristLocations = {
   LocationType.evenement,
   LocationType.horeca,
 };
+
+// ---------------------------------------------------------------------------
+// Landkaart en toezichthouder. Bron: Ontwerper dd 2026-07-04 ("Interactieve
+// landkaart & De Nationale Bank").
+// ---------------------------------------------------------------------------
+
+/// Kaartzone van elke locatiesoort.
+const Map<LocationType, MapZone> kLocationZone = {
+  LocationType.winkel: MapZone.dorp,
+  LocationType.zorg: MapZone.dorp,
+  LocationType.openbaar: MapZone.dorp,
+  LocationType.station: MapZone.stad,
+  LocationType.winkelcentrum: MapZone.stad,
+  LocationType.horeca: MapZone.stad,
+  LocationType.evenement: MapZone.regio,
+  LocationType.reizen: MapZone.regio,
+  LocationType.snelweg: MapZone.landelijk,
+};
+
+/// Enkele reistijd van een CIT-wagen naar een zone, in ticks. Het depot
+/// staat in het dorp; hoe verder de zone, hoe langer de rit (15 tot 60).
+const Map<MapZone, int> kZoneTravelTicks = {
+  MapZone.dorp: 15,
+  MapZone.stad: 25,
+  MapZone.regio: 40,
+  MapZone.landelijk: 60,
+};
+
+/// Vast punt op de landkaart, genormaliseerd 0,0 tot 1,0 in beide assen.
+class MapPoint {
+  const MapPoint(this.x, this.y);
+
+  final double x;
+  final double y;
+}
+
+/// Vaste coördinaten van elke locatiesoort op de landkaart. De kaart is in
+/// kwadranten verdeeld: dorp linksboven, stad rechtsboven, regio linksonder,
+/// landelijk rechtsonder.
+const Map<LocationType, MapPoint> kLocationMapPoints = {
+  LocationType.winkel: MapPoint(0.14, 0.16),
+  LocationType.zorg: MapPoint(0.34, 0.34),
+  LocationType.openbaar: MapPoint(0.15, 0.38),
+  LocationType.station: MapPoint(0.64, 0.14),
+  LocationType.winkelcentrum: MapPoint(0.86, 0.30),
+  LocationType.horeca: MapPoint(0.66, 0.38),
+  LocationType.evenement: MapPoint(0.16, 0.64),
+  LocationType.reizen: MapPoint(0.36, 0.86),
+  LocationType.snelweg: MapPoint(0.74, 0.74),
+};
+
+/// Spreidingswet van de Nationale Bank: vanaf dit aantal automaten in een
+/// zone weigert de toezichthouder een volgende vergunning in die zone
+/// zolang de rest van het land achterblijft. Concreet: een zone is
+/// geblokkeerd wanneer hij [kSpreadLawZoneCap] of meer automaten heeft en
+/// de leegste zone er [kSpreadLawZoneCap] minder heeft.
+const int kSpreadLawZoneCap = 4;
 
 // ---------------------------------------------------------------------------
 // Events. Bron: GDD 6, tabel Events.
@@ -292,10 +387,6 @@ const double kHeistInsurancePerIbnsLevel = 60;
 // Terminal-tiers. Bron: Tiers-tab, rijen 2 tot 5.
 // ---------------------------------------------------------------------------
 
-/// Cassettecapaciteit in biljetten per tier, index 0 = Lobby basic tot
-/// index 3 = TTW recycler. Bron: Tiers!B2 tot B5.
-const List<int> kTierCapacity = [100, 160, 240, 340];
-
 /// Inkomen per transactie in EUR per tier. Bron: Tiers!C2 tot C5.
 const List<double> kTierIncomePerTransaction = [2, 3, 5, 8];
 
@@ -306,19 +397,6 @@ const List<double> kTierUpgradeCost = [0, 350, 840, 2016];
 // ---------------------------------------------------------------------------
 // Netwerk-upgrades. Bron: Upgrades-tab en GDD 7.1 tabel Upgrades.
 // ---------------------------------------------------------------------------
-
-/// Grotere cassettes: basisprijs. Bron: Upgrades!B4.
-const double kCassetteUpgradeBasePrice = 300;
-
-/// Grotere cassettes: prijsgroeifactor per level. Bron: Upgrades!C4.
-const double kCassetteUpgradeGrowth = 2;
-
-/// Grotere cassettes: maximaal level. Bron: GDD 7.1 tabel Upgrades.
-const int kCassetteUpgradeMaxLevel = 5;
-
-/// Grotere cassettes: extra capaciteit per level, additief op de
-/// tiercapaciteit. Bron: Upgrades!I4 ("+40% capaciteit").
-const double kCassetteCapacityBonusPerLevel = 0.40;
 
 /// Beveiliging (IBNS): basisprijs. Bron: Upgrades!B5.
 const double kIbnsUpgradeBasePrice = 250;
@@ -346,8 +424,9 @@ const double kCitRouteUpgradeGrowth = 2;
 /// CIT-routeoptimalisatie: maximaal level. Bron: GDD 7.1 tabel Upgrades.
 const int kCitRouteUpgradeMaxLevel = 4;
 
-/// CIT-routeoptimalisatie: korting op ritkosten per level, additief.
-/// Bron: Parameters!C18 en Upgrades!I6 ("-15% refillkosten").
+/// CIT-routeoptimalisatie: korting op ritkosten en reistijd per level,
+/// additief. Bron: Parameters!C18 en Upgrades!I6 ("-15% refillkosten");
+/// de reistijdkorting is Ontwerper dd 2026-07-04 (CIT-vlootsysteem).
 const double kCitRouteDiscountPerLevel = 0.15;
 
 // ---------------------------------------------------------------------------

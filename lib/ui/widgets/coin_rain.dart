@@ -41,10 +41,7 @@ class _CoinRainOverlayState extends State<CoinRainOverlay> {
         return;
       }
       setState(() {
-        _burst = _Burst(
-          event,
-          List.generate(24, (_) => _random.nextDouble()),
-        );
+        _burst = _Burst(event, List.generate(24, (_) => _random.nextDouble()));
       });
       _clearTimer?.cancel();
       _clearTimer = Timer(const Duration(milliseconds: 2200), () {
@@ -88,8 +85,7 @@ class _CoinRainOverlayState extends State<CoinRainOverlay> {
           Align(
             alignment: const Alignment(0, -0.5),
             child: Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
               decoration: BoxDecoration(
                 gradient: kHeaderGradient,
                 borderRadius: BorderRadius.circular(14),

@@ -18,15 +18,17 @@ typedef Clock = DateTime Function();
 /// geconfigureerd in main.dart.
 final tickEngineProvider = Provider<TickEngine>((ref) => TickEngine());
 
-final offlineCalculatorProvider =
-    Provider<OfflineCalculator>((ref) => const OfflineCalculator());
+final offlineCalculatorProvider = Provider<OfflineCalculator>(
+  (ref) => const OfflineCalculator(),
+);
 
 final clockProvider = Provider<Clock>((ref) => DateTime.now);
 
 final saveRepositoryProvider = Provider<SaveRepository?>((ref) => null);
 
-final gameControllerProvider =
-    NotifierProvider<GameController, GameState>(GameController.new);
+final gameControllerProvider = NotifierProvider<GameController, GameState>(
+  GameController.new,
+);
 
 /// Houdt de [GameState] bij, draait de tick-engine op 1 tick per seconde en
 /// bewaart de staat elke [kAutosaveIntervalSeconds] seconden en bij
@@ -50,9 +52,8 @@ class GameController extends Notifier<GameState> {
 
   /// Verdiend in de afgelopen minuut, in EUR. Groeit de eerste minuut mee
   /// met het beschikbare venster.
-  double get incomePerMinute => _earnedSamples.isEmpty
-      ? 0
-      : state.totalEarned - _earnedSamples.first;
+  double get incomePerMinute =>
+      _earnedSamples.isEmpty ? 0 : state.totalEarned - _earnedSamples.first;
 
   @override
   GameState build() {
@@ -71,16 +72,19 @@ class GameController extends Notifier<GameState> {
     }
     // Offline-doorrekening over het verschil met de tijdstempel (GDD 9.4).
     final elapsed = ref.read(clockProvider)().difference(saved.savedAt);
-    final result =
-        ref.read(offlineCalculatorProvider).apply(saved.state, elapsed);
+    final result = ref
+        .read(offlineCalculatorProvider)
+        .apply(saved.state, elapsed);
     lastOfflineResult = result;
     return result.state;
   }
 
   int _firstEventInterval() =>
       kEventIntervalMinSeconds +
-      ref.read(tickEngineProvider).random.nextInt(
-          kEventIntervalMaxSeconds - kEventIntervalMinSeconds + 1);
+      ref
+          .read(tickEngineProvider)
+          .random
+          .nextInt(kEventIntervalMaxSeconds - kEventIntervalMinSeconds + 1);
 
   /// Start de klok: een tick per seconde (GDD 11).
   void start() {
@@ -130,15 +134,19 @@ class GameController extends Notifier<GameState> {
 
   // Spelersacties: dunne doorgifte naar de engine.
 
-  void refillAtm(int atmId) => _apply((e, s) => e.refillAtm(s, atmId));
+  void requestService(int atmId) =>
+      _apply((e, s) => e.requestService(s, atmId));
 
   void tapRepair(int atmId) => _apply((e, s) => e.tapRepair(s, atmId));
 
   void preventiveMaintenance(int atmId) =>
       _apply((e, s) => e.preventiveMaintenance(s, atmId));
 
-  void buyAtm(LocationType location) =>
-      _apply((e, s) => e.buyAtm(s, location));
+  void buyAtm(LocationType location) => _apply((e, s) => e.buyAtm(s, location));
+
+  void buyCassette(int atmId) => _apply((e, s) => e.buyCassette(s, atmId));
+
+  void buyCitVan() => _apply((e, s) => e.buyCitVan(s));
 
   void upgradeAtmTier(int atmId) =>
       _apply((e, s) => e.upgradeAtmTier(s, atmId));

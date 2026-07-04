@@ -40,27 +40,48 @@ void main() {
       expect(singleAtmState(totalEarned: 1999).playerLevel, PlayerLevel.dorp);
       expect(singleAtmState(totalEarned: 2000).playerLevel, PlayerLevel.stad);
       expect(singleAtmState(totalEarned: 8000).playerLevel, PlayerLevel.regio);
-      expect(singleAtmState(totalEarned: 25000).playerLevel,
-          PlayerLevel.landelijk);
+      expect(
+        singleAtmState(totalEarned: 25000).playerLevel,
+        PlayerLevel.landelijk,
+      );
       expect(singleAtmState(totalEarned: 2000).locationSlots, 6);
     });
   });
 
-  group('Bijvuldoel (GDD 9.2)', () {
-    test('drie bijvullingen ronden de eerste ronde af', () {
+  group('Bijvuldoel (GDD 9.2, via de CIT-vloot)', () {
+    /// Stuurt een wagen en tikt door tot de servicing is toegepast; de
+    /// cassette gaat daarna meteen weer leeg zodat de volgende ronde kan
+    /// (en er nauwelijks float-rente over volle cassettes loopt).
+    GameState completeService(TickEngine engine, GameState s) {
+      s = engine.requestService(s, 0);
+      final before = s.refillGoalRound * 1000 + s.refillGoalProgress;
+      while (s.refillGoalRound * 1000 + s.refillGoalProgress == before) {
+        s = engine.tick(s);
+      }
+      s = withFirstCassette(s, notes: 0);
+      // Wagen terug laten keren zodat hij weer inzetbaar is.
+      while (s.citVans.any((v) => !v.isIdle)) {
+        s = engine.tick(s);
+      }
+      return s;
+    }
+
+    test('drie afgeronde servicing-ritten ronden de eerste ronde af', () {
       final engine = TickEngine(random: FakeRandom());
       var s = singleAtmState(notesInCassette: 0, balance: 1000);
       for (var i = 0; i < 3; i++) {
-        s = engine.refillAtm(s, 0);
-        s = s.withAtm(s.atms.first.copyWith(notesInCassette: 0));
+        s = completeService(engine, s);
       }
       expect(s.refillGoalRound, 1);
       expect(s.refillGoalProgress, 0);
       expect(s.refillGoalTarget, 4);
-      expect(s.refillGoalReward,
-          closeTo(kRefillGoalBaseReward * kRefillGoalRewardGrowth, 1e-9));
-      // Saldo: 1000 - 3 ritten van 60 + beloning 75.
-      expect(s.balance, closeTo(1000 - 3 * kCitCostPerTrip + 75, 1e-9));
+      expect(
+        s.refillGoalReward,
+        closeTo(kRefillGoalBaseReward * kRefillGoalRewardGrowth, 1e-9),
+      );
+      // Saldo: 1000 - 3 ritten van 60 + beloning 75, minus een restje
+      // float-rente over de korte momenten met een volle cassette.
+      expect(s.balance, closeTo(1000 - 3 * kCitCostPerTrip + 75, 0.5));
       expect(s.totalEarned, 75);
     });
 
@@ -71,32 +92,33 @@ void main() {
       expect(s.refillGoalTarget, kRefillGoalMaxTarget);
     });
 
-    test('een volle cassette bijvullen kan niet', () {
-      final engine = TickEngine(random: FakeRandom());
-      final s = singleAtmState(balance: 1000);
-      expect(engine.refillAtm(s, 0).balance, 1000);
-    });
-
     test('CIT-routeoptimalisatie geeft 15% korting per level', () {
       var s = singleAtmState(notesInCassette: 0, balance: 1000);
       s = withUpgradeLevel(s, UpgradeId.citRoute, 2);
       expect(s.citTripCost, closeTo(60 * 0.7, 1e-9));
-      final after = TickEngine(random: FakeRandom()).refillAtm(s, 0);
+      final after = TickEngine(random: FakeRandom()).requestService(s, 0);
       expect(after.balance, closeTo(1000 - 42, 1e-9));
     });
 
-    test('CIT-planner vult automatisch bij onder 15% cassette', () {
+    test('CIT-planner stuurt automatisch een wagen onder 15% voorraad', () {
       final engine = TickEngine(random: FakeRandom());
       var s = singleAtmState(notesInCassette: 14, balance: 1000);
       s = withStaffHired(s, StaffId.citPlanner);
       s = engine.tick(s);
-      expect(s.atms.first.notesInCassette, 100);
+      expect(s.citVans.single.status, CitVanStatus.transitToAtm);
+      expect(s.citVans.single.targetAtmId, 0);
+      // Na reistijd plus servicing is de cassette echt vol.
+      final travel = s.travelTicksTo(LocationType.station);
+      for (var i = 0; i < travel + kServicingDurationTicks; i++) {
+        s = engine.tick(s);
+      }
+      expect(s.atms.first.notesInCassette, kCassetteCapacityUnits);
       expect(s.refillGoalProgress, 1);
 
-      // Boven de drempel blijft de planner van de cassette af.
+      // Boven de drempel blijft de planner van de vloot af.
       var idle = singleAtmState(notesInCassette: 16, balance: 1000);
       idle = withStaffHired(idle, StaffId.citPlanner);
-      expect(engine.tick(idle).atms.first.notesInCassette, 16);
+      expect(engine.tick(idle).citVans.single.isIdle, isTrue);
     });
   });
 
@@ -118,14 +140,16 @@ void main() {
       expect(s.nextAtmPrice, closeTo(640, 1e-9));
       final bought = s.atms.last;
       expect(bought.tier, AtmTier.lobbyBasic);
-      expect(bought.notesInCassette, kTierCapacity[0]);
+      expect(bought.cassettes.length, 1);
+      expect(bought.notesInCassette, kCassetteCapacityUnits);
       expect(bought.condition, 1.0);
     });
 
     test('locatiesloten begrenzen het netwerk', () {
       final engine = TickEngine(random: FakeRandom());
-      var s = GameState.initial(nextEventInSeconds: 1000000)
-          .copyWith(balance: 100000);
+      var s = GameState.initial(
+        nextEventInSeconds: 1000000,
+      ).copyWith(balance: 100000);
       s = engine.buyAtm(s, LocationType.winkel);
       s = engine.buyAtm(s, LocationType.station);
       s = engine.buyAtm(s, LocationType.horeca);
@@ -136,7 +160,7 @@ void main() {
       expect(refused.balance, s.balance);
     });
 
-    test('tier-upgrades volgen de kostentabel en behouden de cassette', () {
+    test('tier-upgrades volgen de kostentabel en behouden de cassettes', () {
       final engine = TickEngine(random: FakeRandom());
       var s = singleAtmState(notesInCassette: 42, balance: 400);
       s = engine.upgradeAtmTier(s, 0);
@@ -149,26 +173,46 @@ void main() {
 
     test('netwerk-upgrades verdubbelen in prijs en hebben een maximum', () {
       final engine = TickEngine(random: FakeRandom());
-      var s = singleAtmState(balance: 900);
-      s = engine.buyUpgrade(s, UpgradeId.cassettes);
-      expect(s.upgradeLevel(UpgradeId.cassettes), 1);
-      expect(s.balance, 600);
-      expect(s.upgrade(UpgradeId.cassettes).nextLevelCost, 600);
-      s = engine.buyUpgrade(s, UpgradeId.cassettes);
-      expect(s.upgradeLevel(UpgradeId.cassettes), 2);
+      var s = singleAtmState(balance: 750);
+      s = engine.buyUpgrade(s, UpgradeId.ibns);
+      expect(s.upgradeLevel(UpgradeId.ibns), 1);
+      expect(s.balance, 500);
+      expect(s.upgrade(UpgradeId.ibns).nextLevelCost, 500);
+      s = engine.buyUpgrade(s, UpgradeId.ibns);
+      expect(s.upgradeLevel(UpgradeId.ibns), 2);
       expect(s.balance, 0);
 
       var maxed = withUpgradeLevel(
-          singleAtmState(balance: 100000), UpgradeId.citRoute, 4);
+        singleAtmState(balance: 100000),
+        UpgradeId.citRoute,
+        4,
+      );
       maxed = engine.buyUpgrade(maxed, UpgradeId.citRoute);
       expect(maxed.upgradeLevel(UpgradeId.citRoute), 4);
       expect(maxed.balance, 100000);
     });
 
-    test('grotere cassettes geven 40% capaciteit per level', () {
-      expect(Atm.capacityFor(AtmTier.lobbyBasic, 0), 100);
-      expect(Atm.capacityFor(AtmTier.lobbyBasic, 1), 140);
-      expect(Atm.capacityFor(AtmTier.ttwRecycler, 5), 1020);
+    test('de vervallen cassette-upgrade is niet meer koopbaar', () {
+      final engine = TickEngine(random: FakeRandom());
+      final s = engine.buyUpgrade(
+        singleAtmState(balance: 100000),
+        UpgradeId.cassettes,
+      );
+      expect(s.upgradeLevel(UpgradeId.cassettes), 0);
+      expect(s.balance, 100000);
+      expect(s.upgrade(UpgradeId.cassettes).isMaxed, isTrue);
+    });
+
+    test('capaciteit groeit per gekochte cassette, niet per tier', () {
+      final engine = TickEngine(random: FakeRandom());
+      var s = singleAtmState(balance: 2 * kExtraCassettePrice);
+      expect(s.atms.first.capacity, kCassetteCapacityUnits);
+      s = engine.buyCassette(s, 0);
+      s = engine.buyCassette(s, 0);
+      expect(s.atms.first.capacity, 3 * kCassetteCapacityUnits);
+      // De tier verandert de capaciteit niet.
+      final upgraded = singleAtmState(tier: AtmTier.ttwRecycler);
+      expect(upgraded.atms.first.capacity, kCassetteCapacityUnits);
     });
 
     test('personeel is eenmalig en kost de tabelprijs', () {
@@ -205,6 +249,9 @@ void main() {
       expect(after.totalEarned, 0);
       expect(after.atms, isEmpty);
       expect(after.milestonesClaimed, 0);
+      // Ook de CIT-vloot gaat terug naar de startwagen.
+      expect(after.citVans.length, kStartingCitVans);
+      expect(after.citVans.every((v) => v.isIdle), isTrue);
       expect(after.bank(BankId.oranje).contractLevel, 3);
       // De Zuiderbank-aansluiting is een aankoop en reset dus wel.
       expect(after.bank(BankId.zuider).connected, isFalse);
@@ -223,23 +270,19 @@ void main() {
       // Na prestige: extra-biljet-roll 0,5 onder de kans 0,6, dus drie
       // biljetten voor een transactie, en inkomen x2.
       final engine = TickEngine(
-        random: FakeRandom(
-          doubles: [0.5, 0.5, 0.5, 0.0, 0.99],
-          bools: [true],
-        ),
+        random: FakeRandom(doubles: [0.5, 0.5, 0.5, 0.0, 0.99], bools: [true]),
       );
       // Prestige start tegenwoordig zonder automaten: zet er een neer.
-      var s = TickEngine(random: FakeRandom())
-          .prestige(singleAtmState(totalEarned: 25000));
+      var s = TickEngine(
+        random: FakeRandom(),
+      ).prestige(singleAtmState(totalEarned: 25000));
       s = s.copyWith(
-        atms: [
-          Atm.fresh(id: 0, location: LocationType.station),
-        ],
+        atms: [Atm.fresh(id: 0, location: LocationType.station)],
         tick: tickForHour(12),
         nextEventInSeconds: 1000000,
       );
       final after = engine.tick(s);
-      expect(after.atms.first.notesInCassette, kTierCapacity[0] - 3);
+      expect(after.atms.first.notesInCassette, kCassetteCapacityUnits - 3);
       expect(after.totalEarned, closeTo(2.0 * 1.1 * 0.9 * 2.0, 1e-9));
     });
   });

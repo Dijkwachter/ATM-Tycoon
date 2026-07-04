@@ -12,8 +12,7 @@ void main() {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
-          tickEngineProvider
-              .overrideWithValue(TickEngine(random: Random(1))),
+          tickEngineProvider.overrideWithValue(TickEngine(random: Random(1))),
         ],
         child: const AtmEmpireApp(),
       ),
@@ -42,8 +41,9 @@ void main() {
     await tester.pump();
   }
 
-  testWidgets('het introscherm toont logo, high score en startknop',
-      (tester) async {
+  testWidgets('het introscherm toont logo, high score en startknop', (
+    tester,
+  ) async {
     await pumpApp(tester);
 
     expect(find.text('EMPIRE'), findsOneWidget);
@@ -55,8 +55,9 @@ void main() {
     await tearDownApp(tester);
   });
 
-  testWidgets('een nieuw spel start met 0 automaten en 1.000 saldo',
-      (tester) async {
+  testWidgets('een nieuw spel start met 0 automaten en 1.000 saldo', (
+    tester,
+  ) async {
     await startGame(tester);
 
     expect(find.text('ATM EMPIRE'), findsOneWidget);
@@ -71,8 +72,7 @@ void main() {
     await tearDownApp(tester);
   });
 
-  testWidgets('een automaat kopen zet een tegel op de kaart',
-      (tester) async {
+  testWidgets('een automaat kopen zet een tegel op de kaart', (tester) async {
     await startGame(tester);
     await buyStationAtm(tester);
 
@@ -117,8 +117,9 @@ void main() {
     await tearDownApp(tester);
   });
 
-  testWidgets('de detail-sheet opent en toont de cassette in biljetten',
-      (tester) async {
+  testWidgets('de detail-sheet opent en toont de cassette in biljetten', (
+    tester,
+  ) async {
     await startGame(tester);
     await buyStationAtm(tester);
 
@@ -149,8 +150,10 @@ void main() {
     );
     // De knop bestaat maar het spel begint ver onder de drempel; een tik
     // wapent hem dus niet.
-    await tester.tap(find.textContaining('Prestige (level'),
-        warnIfMissed: false);
+    await tester.tap(
+      find.textContaining('Prestige (level'),
+      warnIfMissed: false,
+    );
     await tester.pump();
     expect(find.text('Tik nogmaals om te verkopen'), findsNothing);
 

@@ -100,8 +100,6 @@ TextStyle ledDigits(double size, {Color color = AppColors.ledGlow}) {
     // Tabulaire cijfers: elk cijfer even breed, zodat oplopende
     // bedragen niet heen en weer springen op het paneel.
     fontFeatures: const [FontFeature.tabularFigures()],
-    shadows: [
-      Shadow(color: color.withValues(alpha: 0.55), blurRadius: 8),
-    ],
+    shadows: [Shadow(color: color.withValues(alpha: 0.55), blurRadius: 8)],
   );
 }

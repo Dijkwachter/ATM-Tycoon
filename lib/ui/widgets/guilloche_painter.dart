@@ -33,8 +33,8 @@ class GuillochePainter extends CustomPainter {
     final orbit = Offset(size.width * 0.5, size.height * 0.5);
     for (var i = 0; i < 24; i++) {
       final angle = i * pi / 12;
-      final position = orbit +
-          Offset(cos(angle) * size.width * 0.32, sin(angle) * 36);
+      final position =
+          orbit + Offset(cos(angle) * size.width * 0.32, sin(angle) * 36);
       canvas.drawCircle(position, 22, paint);
     }
   }

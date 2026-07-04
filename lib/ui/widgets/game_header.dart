@@ -38,8 +38,7 @@ class GameHeader extends StatelessWidget {
         ],
       ),
       child: ClipRRect(
-        borderRadius:
-            const BorderRadius.vertical(bottom: Radius.circular(20)),
+        borderRadius: const BorderRadius.vertical(bottom: Radius.circular(20)),
         child: CustomPaint(
           painter: const GuillochePainter(),
           child: SafeArea(
@@ -74,14 +73,15 @@ class GameHeader extends StatelessWidget {
                                       ? Icons.volume_off_outlined
                                       : Icons.volume_up_outlined,
                                   size: 18,
-                                  color:
-                                      AppColors.ink.withValues(alpha: 0.8),
+                                  color: AppColors.ink.withValues(alpha: 0.8),
                                 ),
                               ),
                             ),
                           _InfoChip(
                             label: formatGameClock(
-                                state.tick, kGameHourRealSeconds),
+                              state.tick,
+                              kGameHourRealSeconds,
+                            ),
                             icon: Icons.schedule,
                           ),
                         ],
@@ -89,17 +89,22 @@ class GameHeader extends StatelessWidget {
                     ],
                   ),
                   const SizedBox(height: 10),
-                  Center(
-                    child: LedDisplay(value: state.balance),
-                  ),
+                  Center(child: LedDisplay(value: state.balance)),
                   const SizedBox(height: 10),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       _InfoChip(
-                        label:
-                            '${formatEuroCompact(incomePerMinute)} per min',
+                        label: '${formatEuroCompact(incomePerMinute)} per min',
                         icon: Icons.trending_up,
+                      ),
+                      // Goedkeuringsscore van de Nationale Bank
+                      // (spreidingswet): rood zodra zones tegen de grens
+                      // aan zitten.
+                      _InfoChip(
+                        label: 'NB ${(state.spreadApproval * 100).round()}%',
+                        icon: Icons.account_balance_outlined,
+                        warning: state.spreadApproval < 0.5,
                       ),
                       _InfoChip(
                         label: 'Level ${_levelLabel(state)}',
@@ -117,39 +122,47 @@ class GameHeader extends StatelessWidget {
   }
 
   String _levelLabel(GameState state) => switch (state.playerLevel.index) {
-        0 => 'Dorp',
-        1 => 'Stad',
-        2 => 'Regio',
-        _ => 'Landelijk',
-      };
+    0 => 'Dorp',
+    1 => 'Stad',
+    2 => 'Regio',
+    _ => 'Landelijk',
+  };
 }
 
 class _InfoChip extends StatelessWidget {
-  const _InfoChip({required this.label, required this.icon});
+  const _InfoChip({
+    required this.label,
+    required this.icon,
+    this.warning = false,
+  });
 
   final String label;
   final IconData icon;
+  final bool warning;
 
   @override
   Widget build(BuildContext context) {
+    final color = warning ? AppColors.warning : AppColors.ink;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.45),
+        color: warning
+            ? AppColors.warning.withValues(alpha: 0.18)
+            : Colors.white.withValues(alpha: 0.45),
         borderRadius: BorderRadius.circular(20),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 14, color: AppColors.ink),
+          Icon(icon, size: 14, color: color),
           const SizedBox(width: 5),
           Text(
             label,
-            style: const TextStyle(
+            style: TextStyle(
               fontFamily: kDigitFont,
               fontSize: 12,
               fontWeight: FontWeight.w700,
-              color: AppColors.ink,
+              color: color,
             ),
           ),
         ],

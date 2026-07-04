@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/constants.dart';
 import '../../models/atm.dart';
+import '../../models/cit_van.dart';
 import '../../models/enums.dart';
 import '../../models/game_state.dart';
 import '../format.dart';
@@ -9,14 +10,15 @@ import '../theme.dart';
 import 'tactile_button.dart';
 
 /// Automaat-tegel (GDD 10): een gele kast in de headergradient, volle
-/// breedte, met automaat-anatomie, cassette- en slijtagebalk en drie
-/// actieknoppen. Een druk- of rustig-label toont de dagcyclus (GDD 5).
+/// breedte, met automaat-anatomie, cassetteslots, voorraad- en
+/// slijtagebalk en drie actieknoppen. Een druk- of rustig-label toont de
+/// dagcyclus (GDD 5).
 class AtmTile extends StatelessWidget {
   const AtmTile({
     super.key,
     required this.state,
     required this.atm,
-    required this.onRefill,
+    required this.onService,
     required this.onRepairTap,
     required this.onMaintain,
     required this.onUpgrade,
@@ -25,21 +27,35 @@ class AtmTile extends StatelessWidget {
 
   final GameState state;
   final Atm atm;
-  final VoidCallback? onRefill;
+  final VoidCallback? onService;
   final VoidCallback? onRepairTap;
   final VoidCallback? onMaintain;
   final VoidCallback? onUpgrade;
   final VoidCallback? onOpenDetails;
 
-  int get _capacity => atm.capacity(state.upgradeLevel(UpgradeId.cassettes));
-
   double get _busyFactor =>
       kBusyProfiles[atm.location]!.factorAt(state.hourOfDay);
 
-  /// Minuten tot de cassette leeg is bij de huidige drukte.
+  /// De wagen die voor deze automaat onderweg is of er staat, of null.
+  CitVan? get _incomingVan {
+    for (final van in state.citVans) {
+      if (van.targetAtmId == atm.id &&
+          (van.status == CitVanStatus.transitToAtm ||
+              van.status == CitVanStatus.servicing)) {
+        return van;
+      }
+    }
+    return null;
+  }
+
+  /// Minuten tot de voorraad leeg is bij de huidige drukte.
   double get _minutesUntilEmpty {
-    final chance = (kTransactionChancePerSecond * _busyFactor)
-        .clamp(0.0, kTransactionChanceCap);
+    final chance =
+        (kTransactionChancePerSecond * _busyFactor).clamp(
+          0.0,
+          kTransactionChanceCap,
+        ) *
+        atm.workingFraction;
     var drainPerSecond = chance * kAvgNotesPerTransaction;
     if (state.hundredEuroNoteActive) {
       drainPerSecond *= kHundredEuroNoteDrainMultiplier;
@@ -47,7 +63,7 @@ class AtmTile extends StatelessWidget {
     if (drainPerSecond <= 0) {
       return double.infinity;
     }
-    return atm.notesInCassette / drainPerSecond / 60;
+    return atm.availableNotes / drainPerSecond / 60;
   }
 
   /// Kast-uiterlijk per tier: de instapkast is vlak geel, vanaf lobby plus
@@ -63,32 +79,32 @@ class AtmTile extends StatelessWidget {
     );
     return switch (atm.tier) {
       AtmTier.lobbyBasic => BoxDecoration(
-          color: AppColors.cabinetBasic,
-          borderRadius: radius,
-          border: Border.all(color: AppColors.cabinetShade, width: 1),
-          boxShadow: const [dropShadow],
-        ),
+        color: AppColors.cabinetBasic,
+        borderRadius: radius,
+        border: Border.all(color: AppColors.cabinetShade, width: 1),
+        boxShadow: const [dropShadow],
+      ),
       AtmTier.lobbyPlus => BoxDecoration(
-          gradient: kHeaderGradient,
-          borderRadius: radius,
-          border: Border.all(color: AppColors.cabinetShade, width: 1),
-          boxShadow: const [dropShadow],
-        ),
+        gradient: kHeaderGradient,
+        borderRadius: radius,
+        border: Border.all(color: AppColors.cabinetShade, width: 1),
+        boxShadow: const [dropShadow],
+      ),
       AtmTier.ttwUnit => BoxDecoration(
-          gradient: kHeaderGradient,
-          borderRadius: radius,
-          border: Border.all(color: AppColors.steel, width: 5),
-          boxShadow: const [dropShadow],
-        ),
+        gradient: kHeaderGradient,
+        borderRadius: radius,
+        border: Border.all(color: AppColors.steel, width: 5),
+        boxShadow: const [dropShadow],
+      ),
       AtmTier.ttwRecycler => BoxDecoration(
-          gradient: kHeaderGradient,
-          borderRadius: radius,
-          border: Border.all(color: AppColors.steel, width: 5),
-          boxShadow: const [
-            dropShadow,
-            BoxShadow(color: Color(0x66FFD75E), blurRadius: 14),
-          ],
-        ),
+        gradient: kHeaderGradient,
+        borderRadius: radius,
+        border: Border.all(color: AppColors.steel, width: 5),
+        boxShadow: const [
+          dropShadow,
+          BoxShadow(color: Color(0x66FFD75E), blurRadius: 14),
+        ],
+      ),
     };
   }
 
@@ -107,15 +123,17 @@ class AtmTile extends StatelessWidget {
           children: [
             _TitleRow(atm: atm, busyFactor: _busyFactor),
             const SizedBox(height: 8),
-            _Anatomy(atm: atm, state: state),
+            _Anatomy(atm: atm, state: state, incomingVan: _incomingVan),
             const SizedBox(height: 10),
+            _CassetteSlots(atm: atm),
+            const SizedBox(height: 6),
             _CassetteBar(
-              notes: atm.notesInCassette,
-              capacity: _capacity,
+              notes: atm.availableNotes,
+              capacity: atm.capacity,
               minutesUntilEmpty: _minutesUntilEmpty,
             ),
             const SizedBox(height: 6),
-            _WearBar(condition: atm.condition),
+            _WearBar(atm: atm),
             const SizedBox(height: 10),
             Row(
               children: [
@@ -132,21 +150,41 @@ class AtmTile extends StatelessWidget {
     );
   }
 
+  /// Servicing stuurt een CIT-wagen; de knop toont waar hij is zolang er
+  /// een onderweg is, en meldt wanneer de hele vloot bezet is.
   Widget _servicingButton() {
-    final canRefill = atm.notesInCassette < _capacity &&
-        state.balance >= state.citTripCost;
+    final van = _incomingVan;
+    if (van != null) {
+      return TactileButton(
+        label: van.status == CitVanStatus.servicing
+            ? 'Servicing...'
+            : 'CIT onderweg',
+        sublabel: '${van.ticksRemaining}s',
+        color: AppColors.serviceButton,
+        onPressed: null,
+      );
+    }
+    final needsService =
+        atm.availableNotes < atm.capacity ||
+        atm.hasBrokenCassette ||
+        atm.cassettes.any((c) => !c.isBroken && c.condition < 1.0);
+    final noVanFree = state.idleVan == null;
+    final canService =
+        needsService && !noVanFree && state.balance >= state.citTripCost;
     return TactileButton(
       label: 'Servicing',
-      sublabel: formatEuroCompact(state.citTripCost),
+      sublabel: noVanFree
+          ? 'geen wagen vrij'
+          : formatEuroCompact(state.citTripCost),
       color: AppColors.serviceButton,
-      onPressed: canRefill ? onRefill : null,
+      onPressed: canService ? onService : null,
     );
   }
 
-  /// Contextuele middenknop (GDD 10): meehelpen bij reparatie, anders
-  /// preventief onderhoud onder 90% staat.
+  /// Contextuele middenknop (GDD 10): meehelpen bij een cassettereparatie,
+  /// anders preventief onderhoud onder 90% staat.
   Widget _maintenanceButton() {
-    if (atm.isBroken) {
+    if (atm.hasBrokenCassette) {
       return TactileButton(
         label: 'Help mee',
         sublabel: '${atm.repairSecondsRemaining.ceil()}s',
@@ -154,8 +192,8 @@ class AtmTile extends StatelessWidget {
         onPressed: onRepairTap,
       );
     }
-    final available = atm.isOperational &&
-        atm.condition < kPreventiveMaintenanceThreshold;
+    final available =
+        atm.isOperational && atm.condition < kPreventiveMaintenanceThreshold;
     return TactileButton(
       label: 'Onderhoud',
       sublabel: 'gratis',
@@ -291,10 +329,11 @@ class _BusyLabel extends StatelessWidget {
 /// bedrag in LED-cijfers, pinpad van zes donkere toetsen, pasjessleuf en
 /// geldsleuf met donkere geleiders.
 class _Anatomy extends StatelessWidget {
-  const _Anatomy({required this.atm, required this.state});
+  const _Anatomy({required this.atm, required this.state, this.incomingVan});
 
   final Atm atm;
   final GameState state;
+  final CitVan? incomingVan;
 
   String get _status {
     if (atm.isBroken) {
@@ -303,17 +342,28 @@ class _Anatomy extends StatelessWidget {
     if (atm.isPausedByOutage) {
       return 'STROOM UIT ${atm.outageSecondsRemaining.ceil()}s';
     }
-    if (atm.notesInCassette == 0) {
+    if (incomingVan?.status == CitVanStatus.servicing) {
+      return 'SERVICING ${incomingVan!.ticksRemaining}s';
+    }
+    if (atm.hasBrokenCassette) {
+      return 'CASSETTE-STORING';
+    }
+    if (atm.availableNotes == 0) {
       return 'CASSETTE LEEG';
+    }
+    if (incomingVan != null) {
+      return 'CIT ONDERWEG ${incomingVan!.ticksRemaining}s';
     }
     return 'IN BEDRIJF';
   }
 
   @override
   Widget build(BuildContext context) {
-    final alert = atm.isBroken ||
+    final alert =
+        atm.isBroken ||
         atm.isPausedByOutage ||
-        atm.notesInCassette == 0;
+        atm.hasBrokenCassette ||
+        atm.availableNotes == 0;
     final tier = atm.tier;
     // De anatomie groeit mee met de tier: vanaf lobby plus een derde
     // toetsenrij en contactless, vanaf TTW een camera, en alleen de
@@ -346,8 +396,7 @@ class _Anatomy extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                         style: ledDigits(
                           11,
-                          color:
-                              alert ? AppColors.warning : AppColors.ledGlow,
+                          color: alert ? AppColors.warning : AppColors.ledGlow,
                         ),
                       ),
                     ),
@@ -387,9 +436,7 @@ class _Anatomy extends StatelessWidget {
                 padding: const EdgeInsets.only(bottom: 3),
                 child: Row(
                   children: [
-                    for (var col = 0;
-                        col < (hasThirdKeyColumn ? 3 : 2);
-                        col++)
+                    for (var col = 0; col < (hasThirdKeyColumn ? 3 : 2); col++)
                       Container(
                         width: hasThirdKeyColumn ? 11 : 15,
                         height: 11,
@@ -449,10 +496,7 @@ class _Anatomy extends StatelessWidget {
                   decoration: BoxDecoration(
                     color: Colors.white,
                     borderRadius: BorderRadius.circular(4),
-                    border: Border.all(
-                      color: AppColors.incomePill,
-                      width: 2,
-                    ),
+                    border: Border.all(color: AppColors.incomePill, width: 2),
                   ),
                   child: const Center(
                     child: Text(
@@ -471,6 +515,76 @@ class _Anatomy extends StatelessWidget {
             ],
           ),
         ),
+      ],
+    );
+  }
+}
+
+/// Rij cassetteslots: per cassette een mini-balkje met de vulling; een
+/// cassette in storing kleurt rood met een moersleuteltje
+/// (multi-cassette, Ontwerper dd 2026-07-04).
+class _CassetteSlots extends StatelessWidget {
+  const _CassetteSlots({required this.atm});
+
+  final Atm atm;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Text(
+          'Slots',
+          style: TextStyle(
+            fontFamily: kDigitFont,
+            fontSize: 10.5,
+            fontWeight: FontWeight.w700,
+            color: AppColors.ink.withValues(alpha: 0.7),
+          ),
+        ),
+        const SizedBox(width: 6),
+        for (final cassette in atm.cassettes)
+          Expanded(
+            child: Container(
+              height: 14,
+              margin: const EdgeInsets.only(right: 4),
+              decoration: BoxDecoration(
+                color: cassette.isBroken
+                    ? AppColors.warning.withValues(alpha: 0.25)
+                    : AppColors.ink.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(4),
+                border: Border.all(
+                  color: cassette.isBroken
+                      ? AppColors.warning
+                      : AppColors.ink.withValues(alpha: 0.25),
+                ),
+              ),
+              child: cassette.isBroken
+                  ? const Icon(Icons.build, size: 9, color: AppColors.warning)
+                  : FractionallySizedBox(
+                      alignment: Alignment.centerLeft,
+                      widthFactor: cassette.notes / kCassetteCapacityUnits,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: AppColors.incomePill,
+                          borderRadius: BorderRadius.circular(3),
+                        ),
+                      ),
+                    ),
+            ),
+          ),
+        for (var i = atm.cassettes.length; i < kMaxCassettesPerAtm; i++)
+          Expanded(
+            child: Container(
+              height: 14,
+              margin: const EdgeInsets.only(right: 4),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(4),
+                border: Border.all(
+                  color: AppColors.ink.withValues(alpha: 0.15),
+                ),
+              ),
+            ),
+          ),
       ],
     );
   }
@@ -510,7 +624,8 @@ class _CassetteBar extends StatelessWidget {
       builder: (context, animatedNotes, _) => _LabeledBar(
         fraction: capacity == 0 ? 0 : notes / capacity,
         color: urgent ? AppColors.warning : AppColors.incomePill,
-        left: 'Cassette '
+        left:
+            'Cassette '
             '${formatEuro(animatedNotes.roundToDouble(), decimals: 0)} '
             'van $displayCapacity biljetten',
         right: notes == 0 ? 'leeg' : label,
@@ -520,22 +635,28 @@ class _CassetteBar extends StatelessWidget {
   }
 }
 
-/// Slijtagebalk (GDD 10).
+/// Slijtagebalk (GDD 10): toont de slechtste werkende cassette; bij een
+/// cassette in storing telt het label mee hoeveel er nog werken.
 class _WearBar extends StatelessWidget {
-  const _WearBar({required this.condition});
+  const _WearBar({required this.atm});
 
-  final double condition;
+  final Atm atm;
 
   @override
   Widget build(BuildContext context) {
+    final condition = atm.condition;
     final low = condition < 0.25;
+    final broken = atm.cassettes.length - atm.workingCassettes.length;
     return _LabeledBar(
       fraction: condition,
       color: low ? AppColors.warning : AppColors.dccPill,
       left: 'Staat ${(condition * 100).round()}%',
-      right: condition < kPreventiveMaintenanceThreshold
+      right: broken > 0
+          ? '$broken cassette${broken == 1 ? '' : 's'} in storing'
+          : condition < kPreventiveMaintenanceThreshold
           ? 'onderhoud beschikbaar'
           : '',
+      rightColor: broken > 0 ? AppColors.warning : null,
     );
   }
 }

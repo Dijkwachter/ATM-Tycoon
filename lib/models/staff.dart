@@ -11,11 +11,11 @@ class Staff {
   final bool hired;
 
   double get price => switch (id) {
-        StaffId.mechanic => kStaffMechanicPrice,
-        StaffId.citPlanner => kStaffCitPlannerPrice,
-        StaffId.analyst => kStaffAnalystPrice,
-        StaffId.regionalManager => kStaffRegionalManagerPrice,
-      };
+    StaffId.mechanic => kStaffMechanicPrice,
+    StaffId.citPlanner => kStaffCitPlannerPrice,
+    StaffId.analyst => kStaffAnalystPrice,
+    StaffId.regionalManager => kStaffRegionalManagerPrice,
+  };
 
   Staff copyWith({bool? hired}) => Staff(id: id, hired: hired ?? this.hired);
 }
