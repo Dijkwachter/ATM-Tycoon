@@ -13,6 +13,13 @@ import 'feedback.dart';
 /// De engine is deterministisch testbaar: de [Random] is injecteerbaar en
 /// alle tijd loopt via de tick-teller in [GameState], niet via de wandklok.
 /// Elke methode is puur: state in, nieuwe state uit.
+///
+/// Sinds het wachtrijmodel (Ontwerper dd 2026-07-04) verlopen transacties
+/// in micro-fases ([TransactionPhase]): klanten komen aan op basis van het
+/// drukteprofiel, sluiten aan in de rij (of lopen door als die vol staat)
+/// en de voorste klant doorloopt kaart -> verwerking -> shutter ->
+/// afronding. Pas bij de afronding wordt de opname of storting financieel
+/// en fysiek (cassette) afgehandeld.
 class TickEngine {
   TickEngine({Random? random, this.onFeedback}) : random = random ?? Random();
 
@@ -32,7 +39,7 @@ class TickEngine {
 
   /// Voert een tick van een seconde uit, in deze volgorde:
   /// 1. spelklok en eventtimers, 2. de CIT-vloot, 3. per automaat
-  /// slijtage, storingen, transacties en stortingen, 4. CIT-planner,
+  /// slijtage, storingen, aanloop en transactiefases, 4. CIT-planner,
   /// 5. float-rente.
   GameState tick(GameState state) {
     var s = state.copyWith(tick: state.tick + 1);
@@ -109,9 +116,12 @@ class TickEngine {
           ),
         );
       case GameEventType.heistAttempt:
-        // Met IBNS afgeslagen plus verzekeringsuitkering; zonder IBNS gaat
-        // de hele automaat een reparatiecyclus offline (alle cassettes in
-        // storing), zonder kosten (GDD 6).
+        // Verdediging in lagen (Ontwerper dd 2026-07-04): IBNS slaat af en
+        // keert verzekering uit; anders kan de kastbeveiliging van het
+        // level de aanval zelf afslaan (lobby's zijn daar buiten
+        // openingstijden kwetsbaarder in); anders gaat de hele automaat
+        // een reparatiecyclus offline (alle cassettes in storing), zonder
+        // kosten (GDD 6).
         if (s.atms.isEmpty) {
           return s;
         }
@@ -122,6 +132,10 @@ class TickEngine {
               kHeistInsuranceBase + kHeistInsurancePerIbnsLevel * ibnsLevel;
           _emit(FeedbackType.insurance, payout, atmId: target.id);
           return _credit(s, payout);
+        }
+        final blockRoll = random.nextDouble();
+        if (blockRoll < target.securityBlockChanceAt(s.hourOfDay)) {
+          return s;
         }
         if (target.isBroken) {
           return s;
@@ -134,10 +148,12 @@ class TickEngine {
                   repairSecondsRemaining: s.repairDurationSeconds.toDouble(),
                 ),
             ],
+            queueLength: 0,
+            clearTransaction: true,
           ),
         );
       case GameEventType.powerOutage:
-        // Een automaat 20 seconden offline, geen kosten.
+        // Een automaat 20 seconden offline, geen kosten; de rij loopt weg.
         final candidates = s.atms.where((a) => a.isOperational).toList();
         if (candidates.isEmpty) {
           return s;
@@ -146,6 +162,8 @@ class TickEngine {
         return s.withAtm(
           target.copyWith(
             outageSecondsRemaining: kPowerOutageDurationSeconds.toDouble(),
+            queueLength: 0,
+            clearTransaction: true,
           ),
         );
     }
@@ -226,14 +244,13 @@ class TickEngine {
   }
 
   // ---------------------------------------------------------------------
-  // Per automaat (GDD 3, 4, 5).
+  // Per automaat: slijtage, storingen, aanloop en transactiefases.
   // ---------------------------------------------------------------------
 
   GameState _tickAtm(GameState s, Atm atm) {
-    // Volledig in storing: alleen de reparatietimers lopen (GDD 4).
+    // Volledig in storing: alleen de reparatietimers lopen en de rij is
+    // weg (GDD 4).
     final wasFullyBroken = atm.isBroken;
-    // Reparaties tellen per cassette af; klaar betekent staat terug op
-    // 100% met behoud van de inhoud.
     if (atm.hasBrokenCassette) {
       atm = atm.copyWith(
         cassettes: [
@@ -249,9 +266,9 @@ class TickEngine {
       );
     }
     if (wasFullyBroken) {
-      return s.withAtm(atm);
+      return s.withAtm(atm.copyWith(queueLength: 0, clearTransaction: true));
     }
-    // Stroomstoring: gepauzeerd, geen slijtage of inkomen.
+    // Stroomstoring: gepauzeerd, geen slijtage, aanloop of transacties.
     if (atm.isPausedByOutage) {
       return s.withAtm(
         atm.copyWith(
@@ -261,7 +278,7 @@ class TickEngine {
     }
 
     // Slijtage op de actieve cassette (de volste), vertraagd door IBNS
-    // (GDD 4). De overige cassettes slijten pas als zij aan de beurt zijn.
+    // (GDD 4) en door de mechanische betrouwbaarheid van het level.
     final ibnsLevel = s.upgradeLevel(UpgradeId.ibns);
     final activeIndex = atm.activeCassetteIndex;
     final activeCassette = atm.cassettes[activeIndex];
@@ -271,22 +288,23 @@ class TickEngine {
         condition: max(
           0,
           activeCassette.condition -
-              kWearPerSecond * (1 - kIbnsWearReductionPerLevel * ibnsLevel),
+              kWearPerSecond *
+                  atm.wearFactor *
+                  (1 - kIbnsWearReductionPerLevel * ibnsLevel),
         ),
       ),
     );
 
-    // Bij staat nul vliegt die ene cassette in storing: voorrijkosten en
-    // een gratis reparatietimer; de overige cassettes draaien door
-    // (GDD 4, multi-cassette Ontwerper dd 2026-07-04). Maximaal een
-    // storing per tick.
+    // Bij staat nul vliegt die ene cassette in storing: voorrijkosten
+    // (nood-trip, gedempt door het beveiligingslevel en IBNS) en een
+    // gratis reparatietimer; de overige cassettes draaien door. Maximaal
+    // een storing per tick.
     final failingIndex = atm.cassettes.indexWhere(
       (c) => !c.isBroken && c.condition <= 0,
     );
     if (failingIndex >= 0) {
       final callout =
-          (kBreakdownCalloutBase + kBreakdownCalloutPerTier * atm.tier.index) *
-          (1 - kIbnsCalloutDiscountPerLevel * ibnsLevel);
+          atm.calloutCost * (1 - kIbnsCalloutDiscountPerLevel * ibnsLevel);
       s = _chargeUpTo(s, callout);
       return s.withAtm(
         atm.withCassette(
@@ -298,31 +316,109 @@ class TickEngine {
       );
     }
 
-    // Opnametransactie (GDD 3.1). Cassettes in storing drukken de
-    // transactiesnelheid evenredig (workingFraction).
+    // Aanloop: kans per tick op een nieuwe klant, gestuurd door het
+    // drukteprofiel, events, openingstijden (lobby) en de werkende
+    // cassettefractie. Bij een volle rij loopt de klant ongeduldig door.
+    final hourFactor = atm.isLobbyClosedAt(s.hourOfDay)
+        ? kLobbyClosedArrivalFactor
+        : 1.0;
     final busyFactor =
         kBusyProfiles[atm.location]!.factorAt(s.hourOfDay) *
-        _eventBusyMultiplier(s, atm);
-    final chance =
+        _eventBusyMultiplier(s, atm) *
+        hourFactor;
+    final arrivalChance =
         min(kTransactionChancePerSecond * busyFactor, kTransactionChanceCap) *
         atm.workingFraction;
-    if (random.nextDouble() < chance) {
-      final result = _attemptTransaction(s, atm);
-      s = result.$1;
-      atm = result.$2;
+    if (random.nextDouble() < arrivalChance) {
+      atm = atm.queueLength < atm.queueCapacity
+          ? atm.copyWith(queueLength: atm.queueLength + 1)
+          : atm.copyWith(lostCustomers: atm.lostCustomers + 1);
     }
 
-    // Storting op een recycler (GDD 3.1).
-    if (atm.tier.isRecycler && random.nextDouble() < kDepositChancePerSecond) {
-      final result = _deposit(s, atm);
-      s = result.$1;
-      atm = result.$2;
-    }
-
-    return s.withAtm(atm);
+    // Transactiefases: start de volgende klant of laat de lopende
+    // transactie een tick vorderen.
+    final result = _advanceTransaction(s, atm);
+    return result.$1.withAtm(result.$2);
   }
 
-  (GameState, Atm) _attemptTransaction(GameState s, Atm atm) {
+  /// Start of vordert de transactie van de voorste klant. Elke fase duurt
+  /// zijn volle aantal ticks; bij het aflopen van de afrondingsfase wordt
+  /// de transactie financieel en fysiek afgehandeld en stapt meteen de
+  /// volgende klant naar voren.
+  (GameState, Atm) _advanceTransaction(GameState s, Atm atm) {
+    final tx = atm.transaction;
+    if (tx == null) {
+      return (s, _startNextCustomer(atm));
+    }
+    final remaining = tx.ticksRemaining - 1;
+    if (remaining > 0) {
+      return (
+        s,
+        atm.copyWith(transaction: tx.copyWith(ticksRemaining: remaining)),
+      );
+    }
+    switch (tx.phase) {
+      case TransactionPhase.cardPresented:
+        return (
+          s,
+          atm.copyWith(
+            transaction: tx.copyWith(
+              phase: TransactionPhase.processing,
+              ticksRemaining: atm.processingTicks,
+            ),
+          ),
+        );
+      case TransactionPhase.processing:
+        return (
+          s,
+          atm.copyWith(
+            transaction: tx.copyWith(
+              phase: TransactionPhase.shutterAction,
+              ticksRemaining: 1,
+            ),
+          ),
+        );
+      case TransactionPhase.shutterAction:
+        return (
+          s,
+          atm.copyWith(
+            transaction: tx.copyWith(
+              phase: TransactionPhase.finishing,
+              ticksRemaining: 1,
+            ),
+          ),
+        );
+      case TransactionPhase.finishing:
+        final resolved = tx.isDeposit
+            ? _resolveDeposit(s, atm)
+            : _resolveWithdrawal(s, atm);
+        s = resolved.$1;
+        atm = resolved.$2.copyWith(clearTransaction: true);
+        return (s, _startNextCustomer(atm));
+    }
+  }
+
+  /// Laat de voorste wachtende klant een transactie beginnen; op een
+  /// recycler bepaalt de kansverdeling of het een storting wordt.
+  Atm _startNextCustomer(Atm atm) {
+    if (atm.queueLength <= 0) {
+      return atm;
+    }
+    final isDeposit =
+        atm.isRecycler && random.nextDouble() < kRecyclerDepositShare;
+    return atm.copyWith(
+      queueLength: atm.queueLength - 1,
+      transaction: AtmTransaction(
+        phase: TransactionPhase.cardPresented,
+        ticksRemaining: 1,
+        isDeposit: isDeposit,
+      ),
+    );
+  }
+
+  /// Rondt een opname af: cassette-drain, inkomen met alle multipliers,
+  /// DCC-kans en de klemloopkans van het mechaniek.
+  (GameState, Atm) _resolveWithdrawal(GameState s, Atm atm) {
     // Cassette-drain: 1 of 2 biljetten, gemiddeld 1,5 (Parameters!B6). Het
     // 100 euro biljet verhoogt de verwachte drain met factor 1,4 via een
     // extra biljet met de passende kans (Parameters!B17).
@@ -334,21 +430,25 @@ class TickEngine {
         notesNeeded += 1;
       }
     }
-    // Onvoldoende biljetten in de werkende cassettes: de opname kan niet
-    // doorgaan.
+    // Onvoldoende biljetten in de werkende cassettes: de klant vangt bot
+    // en loopt weg zonder opname.
     final drainedAtm = atm.drained(notesNeeded);
     if (drainedAtm == null) {
-      return (s, atm);
+      return (s, atm.copyWith(lostCustomers: atm.lostCustomers + 1));
     }
 
-    // Opbrengst = tierinkomen x spreiding x banktarief x multipliers
-    // (GDD 3.1 tabel Inkomsten).
+    // Opbrengst = basisinkomen (functionaliteit) x klanttevredenheid
+    // (level) x spreiding x banktarief x netwerkmultipliers.
     final spread =
         kIncomeSpreadMin +
         random.nextDouble() * (kIncomeSpreadMax - kIncomeSpreadMin);
     final bankRate = s.bank(_pickBank(s)).effectiveRate;
     var income =
-        atm.incomePerTransaction * spread * bankRate * s.incomeMultiplier;
+        atm.baseIncome *
+        atm.levelIncomeMultiplier *
+        spread *
+        bankRate *
+        s.incomeMultiplier;
 
     _emit(FeedbackType.income, income, atmId: atm.id);
 
@@ -362,13 +462,68 @@ class TickEngine {
     }
 
     s = _credit(s, income);
+    var updated = drainedAtm.copyWith(
+      lifetimeEarned: atm.lifetimeEarned + income,
+    );
     // Deze opname trekt de voorraad leeg: meld dat aan de UI en audio.
-    if (drainedAtm.availableNotes == 0) {
+    if (updated.availableNotes == 0) {
       _emit(FeedbackType.cassetteEmpty, 0, atmId: atm.id);
     }
-    return (
-      s,
-      drainedAtm.copyWith(lifetimeEarned: atm.lifetimeEarned + income),
+    updated = _rollForJam(updated);
+    return (s, updated);
+  }
+
+  /// Rondt een storting af: fee-inkomen, biljetten de leegste werkende
+  /// cassette in en de (hogere) klemloopkans van de invoer.
+  (GameState, Atm) _resolveDeposit(GameState s, Atm atm) {
+    final notes =
+        kDepositNotesMin +
+        random.nextInt(kDepositNotesMax - kDepositNotesMin + 1);
+    final income =
+        kRecyclerDepositFee * atm.levelIncomeMultiplier * s.incomeMultiplier;
+    _emit(FeedbackType.recycling, income, atmId: atm.id);
+    s = _credit(s, income);
+
+    var targetIndex = -1;
+    var fewestNotes = kCassetteCapacityUnits + 1;
+    for (var i = 0; i < atm.cassettes.length; i++) {
+      final c = atm.cassettes[i];
+      if (!c.isBroken && c.notes < fewestNotes) {
+        targetIndex = i;
+        fewestNotes = c.notes;
+      }
+    }
+    final target = atm.cassettes[targetIndex];
+    var updated = atm
+        .withCassette(
+          targetIndex,
+          target.copyWith(
+            notes: min(kCassetteCapacityUnits, target.notes + notes),
+            condition: max(0, target.condition - kRecyclerWearPerDeposit),
+          ),
+        )
+        .copyWith(lifetimeEarned: atm.lifetimeEarned + income);
+    updated = _rollForJam(updated);
+    return (s, updated);
+  }
+
+  /// Mechanische klemloop (Ontwerper dd 2026-07-04): per afgeronde
+  /// transactie een kleine, level-gedempte kans dat de actieve cassette
+  /// vastloopt. De reparatie is gratis (monteursbezoek zit in het
+  /// servicecontract); alleen de uitvaltijd doet pijn.
+  Atm _rollForJam(Atm atm) {
+    if (random.nextDouble() >= atm.jamChance) {
+      return atm;
+    }
+    final index = atm.activeCassetteIndex;
+    if (index < 0) {
+      return atm;
+    }
+    return atm.withCassette(
+      index,
+      atm.cassettes[index].copyWith(
+        repairSecondsRemaining: kRepairDurationSeconds.toDouble(),
+      ),
     );
   }
 
@@ -385,37 +540,6 @@ class TickEngine {
       }
     }
     return picked;
-  }
-
-  (GameState, Atm) _deposit(GameState s, Atm atm) {
-    // 0,50 fee, 2 tot 6 biljetten terug de leegste werkende cassette in
-    // (tot haar capaciteit) en 0,003 extra slijtage op die cassette
-    // (GDD 3.1 en 4, Parameters!B23 en B24).
-    var targetIndex = -1;
-    var fewestNotes = kCassetteCapacityUnits + 1;
-    for (var i = 0; i < atm.cassettes.length; i++) {
-      final c = atm.cassettes[i];
-      if (!c.isBroken && c.notes < fewestNotes) {
-        targetIndex = i;
-        fewestNotes = c.notes;
-      }
-    }
-    final notes =
-        kDepositNotesMin +
-        random.nextInt(kDepositNotesMax - kDepositNotesMin + 1);
-    _emit(FeedbackType.recycling, kDepositFeeEur, atmId: atm.id);
-    s = _credit(s, kDepositFeeEur);
-    final target = atm.cassettes[targetIndex];
-    final updated = atm
-        .withCassette(
-          targetIndex,
-          target.copyWith(
-            notes: min(kCassetteCapacityUnits, target.notes + notes),
-            condition: max(0, target.condition - kRecyclerWearPerDeposit),
-          ),
-        )
-        .copyWith(lifetimeEarned: atm.lifetimeEarned + kDepositFeeEur);
-    return (s, updated);
   }
 
   // ---------------------------------------------------------------------
@@ -529,11 +653,20 @@ class TickEngine {
     return _credit(s, reward);
   }
 
-  /// Koopt een nieuwe Lobby basic op de gegeven locatie (GDD 3.3), mits de
-  /// Nationale Bank de zone niet geblokkeerd heeft (spreidingswet,
-  /// Ontwerper dd 2026-07-04).
-  GameState buyAtm(GameState s, LocationType location) {
-    final price = s.nextAtmPrice;
+  /// Koopt en configureert een nieuwe automaat op de gegeven locatie
+  /// (Ontwerper dd 2026-07-04): behuizing en functionaliteit bepalen de
+  /// meerprijs bovenop [GameState.nextAtmPrice]. De Nationale Bank kan de
+  /// zone geblokkeerd hebben (spreidingswet).
+  GameState buyAtm(
+    GameState s,
+    LocationType location, {
+    AtmHousing housing = AtmHousing.lobby,
+    AtmFunction function = AtmFunction.dispenser,
+  }) {
+    final price =
+        s.nextAtmPrice +
+        (housing == AtmHousing.ttw ? kTtwHousingPremium : 0) +
+        (function == AtmFunction.recycler ? kRecyclerFunctionPremium : 0);
     if (s.balance < price ||
         s.atms.length >= s.locationSlots ||
         s.isZoneBlocked(kLocationZone[location]!)) {
@@ -544,7 +677,12 @@ class TickEngine {
       balance: s.balance - price,
       atms: [
         ...s.atms,
-        Atm.fresh(id: nextId, location: location),
+        Atm.fresh(
+          id: nextId,
+          location: location,
+          housing: housing,
+          function: function,
+        ),
       ],
     );
   }
@@ -582,21 +720,18 @@ class TickEngine {
     );
   }
 
-  /// Upgrade een automaat naar de volgende tier (GDD 3.3, Tiers-tab).
-  /// De cassettes en hun inhoud blijven staan.
-  GameState upgradeAtmTier(GameState s, int atmId) {
+  /// Upgrade een automaat naar het volgende level (1 tot 5, Ontwerper dd
+  /// 2026-07-04): sneller, betrouwbaarder, langere rij, veiliger en een
+  /// hogere klanttevredenheids-multiplier. Cassettes en inhoud blijven.
+  GameState upgradeAtm(GameState s, int atmId) {
     final atm = s.atmById(atmId);
-    final next = atm.tier.next;
-    if (next == null) {
-      return s;
-    }
-    final cost = kTierUpgradeCost[next.index];
-    if (s.balance < cost) {
+    final cost = atm.nextLevelCost;
+    if (cost == null || s.balance < cost) {
       return s;
     }
     return s
         .copyWith(balance: s.balance - cost)
-        .withAtm(atm.copyWith(tier: next));
+        .withAtm(atm.copyWith(level: atm.level + 1));
   }
 
   /// Koopt het volgende level van een netwerk-upgrade (GDD 7.1).

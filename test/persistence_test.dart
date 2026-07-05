@@ -36,7 +36,9 @@ void main() {
   test('GameState plus tijdstempel overleven een Hive-rondreis', () async {
     // Een staat met zoveel mogelijk afwijkende velden.
     var state = singleAtmState(
-      tier: AtmTier.ttwRecycler,
+      housing: AtmHousing.ttw,
+      function: AtmFunction.recycler,
+      level: 4,
       location: LocationType.evenement,
       balance: 1234.56,
       totalEarned: 8888,
@@ -51,6 +53,7 @@ void main() {
             Cassette(notes: 46, condition: 0.9),
           ],
           lifetimeEarned: 55.5,
+          lostCustomers: 12,
         ),
         Atm.fresh(id: 9, location: LocationType.snelweg),
       ],
@@ -100,7 +103,9 @@ void main() {
     expect(restored.atms.length, 2);
     final atm = restored.atms.first;
     expect(atm.id, 0);
-    expect(atm.tier, AtmTier.ttwRecycler);
+    expect(atm.housing, AtmHousing.ttw);
+    expect(atm.function, AtmFunction.recycler);
+    expect(atm.level, 4);
     expect(atm.location, LocationType.evenement);
     expect(atm.cassettes.length, 2);
     expect(atm.cassettes.first.notes, 77);
@@ -109,6 +114,10 @@ void main() {
     expect(atm.cassettes.last.notes, 46);
     expect(atm.cassettes.last.condition, 0.9);
     expect(atm.lifetimeEarned, 55.5);
+    expect(atm.lostCustomers, 12);
+    // Wachtrij en lopende transactie zijn bewust niet gepersisteerd.
+    expect(atm.queueLength, 0);
+    expect(atm.transaction, isNull);
 
     expect(restored.citVans.length, 2);
     expect(restored.citVans.first.isIdle, isTrue);
@@ -135,13 +144,14 @@ void main() {
   });
 
   group('Migratie van oude saves (Ontwerper dd 2026-07-04)', () {
-    test('een legacy-automaat wordt over cassettes van 100 verdeeld', () {
-      // Het oude formaat: id, tier, locatie, biljetten, staat, reparatie,
-      // stroomstoring, verdiend - zonder sentinel.
+    test('v1: enkele cassette wordt verdeeld en de tier gemapt', () {
+      // Het v1-formaat: id, tier, locatie, biljetten, staat, reparatie,
+      // stroomstoring, verdiend - zonder sentinel. Tierindex 3 was de
+      // TTW recycler.
       final writer = BinaryWriterImpl(Hive);
       writer
         ..writeInt(4)
-        ..writeInt(AtmTier.ttwRecycler.index)
+        ..writeInt(3)
         ..writeInt(LocationType.reizen.index)
         ..writeInt(234)
         ..writeDouble(0.66)
@@ -152,7 +162,9 @@ void main() {
       final atm = AtmAdapter().read(BinaryReaderImpl(writer.toBytes(), Hive));
 
       expect(atm.id, 4);
-      expect(atm.tier, AtmTier.ttwRecycler);
+      expect(atm.housing, AtmHousing.ttw);
+      expect(atm.function, AtmFunction.recycler);
+      expect(atm.level, 3);
       expect(atm.location, LocationType.reizen);
       // 234 biljetten worden 100 + 100 + 34: geen biljet verloren.
       expect(atm.cassettes.length, 3);
@@ -163,11 +175,11 @@ void main() {
       expect(atm.lifetimeEarned, 1234.5);
     });
 
-    test('een lege legacy-automaat krijgt een lege cassette', () {
+    test('v1: een lege automaat krijgt een lege cassette', () {
       final writer = BinaryWriterImpl(Hive);
       writer
         ..writeInt(0)
-        ..writeInt(AtmTier.lobbyBasic.index)
+        ..writeInt(0)
         ..writeInt(LocationType.winkel.index)
         ..writeInt(0)
         ..writeDouble(1.0)
@@ -178,24 +190,39 @@ void main() {
       final atm = AtmAdapter().read(BinaryReaderImpl(writer.toBytes(), Hive));
       expect(atm.cassettes.length, 1);
       expect(atm.cassettes.single.notes, 0);
+      expect(atm.housing, AtmHousing.lobby);
+      expect(atm.function, AtmFunction.dispenser);
+      expect(atm.level, 1);
     });
 
-    test('een legacy-storing geldt voor alle gemigreerde cassettes', () {
+    test('v2: multi-cassette met tier wordt naar de configuratie gemapt', () {
+      // Het v2-formaat: sentinel -2, id, tier, locatie, stroomstoring,
+      // verdiend, cassettelijst. Tierindex 1 was de Lobby plus.
       final writer = BinaryWriterImpl(Hive);
       writer
+        ..writeInt(-2)
+        ..writeInt(7)
         ..writeInt(1)
-        ..writeInt(AtmTier.lobbyPlus.index)
         ..writeInt(LocationType.station.index)
-        ..writeInt(150)
         ..writeDouble(0.0)
-        ..writeDouble(21.0)
+        ..writeDouble(9.9)
+        ..writeInt(2)
+        ..writeInt(80)
+        ..writeDouble(0.5)
         ..writeDouble(0.0)
-        ..writeDouble(9.9);
+        ..writeInt(30)
+        ..writeDouble(0.9)
+        ..writeDouble(21.0);
 
       final atm = AtmAdapter().read(BinaryReaderImpl(writer.toBytes(), Hive));
+      expect(atm.id, 7);
+      expect(atm.housing, AtmHousing.lobby);
+      expect(atm.function, AtmFunction.dispenser);
+      expect(atm.level, 2);
       expect(atm.cassettes.length, 2);
-      expect(atm.isBroken, isTrue);
-      expect(atm.repairSecondsRemaining, 21.0);
+      expect(atm.cassettes.first.notes, 80);
+      expect(atm.cassettes.last.isBroken, isTrue);
+      expect(atm.lifetimeEarned, 9.9);
     });
 
     test('een GameState zonder vlootveld krijgt de startvloot', () {

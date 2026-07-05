@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:atm_empire/core/constants.dart';
 import 'package:atm_empire/engine/offline_calculator.dart';
 import 'package:atm_empire/engine/tick_engine.dart';
@@ -11,16 +13,18 @@ import 'helpers/states.dart';
 void main() {
   const calculator = OfflineCalculator();
 
-  // Verwachte waarden voor een Lobby basic op een station:
-  // etmaalgemiddelde 26,8 / 24, transacties per seconde 0,55 x dat
-  // gemiddelde, drain 1,5 biljet per transactie, gewogen banktarief
-  // 0,5 x 0,9 + 0,3 x 1,1 + 0,2 x 1,35 = 1,05.
+  // Verwachte waarden voor een TTW dispenser level 1 op een station (TTW
+  // heeft geen openingstijden-demping, dus het etmaalgemiddelde geldt
+  // onverdund): aanloop 0,55 x (26,8 / 24), maar de doorvoer wordt
+  // begrensd door de verwerkingstijd van 7 ticks per klant.
   const stationAvg = 26.8 / 24;
-  const txPerSecond = kTransactionChancePerSecond * stationAvg;
-  const drainPerSecond = txPerSecond * kAvgNotesPerTransaction;
+  const arrivals = kTransactionChancePerSecond * stationAvg;
+  final txPerSecond = min(arrivals, 1 / 7);
+  final drainPerSecond = txPerSecond * kAvgNotesPerTransaction;
   const weightedRate = 0.5 * 0.9 + 0.3 * 1.1 + 0.2 * 1.35;
   const incomePerTx =
-      2.0 * kIncomeSpreadAvg * weightedRate + kDccChanceTourist * kDccBonusEur;
+      kDispenserBaseIncome * kIncomeSpreadAvg * weightedRate +
+      kDccChanceTourist * kDccBonusEur;
 
   group('Offline-doorrekening (GDD 9.4)', () {
     test('afwezigheid wordt gecapt op 1 uur', () {
@@ -31,56 +35,89 @@ void main() {
       expect(result.simulatedSeconds, 3600);
     });
 
-    test('inkomen is 50% van normaal, begrensd door de cassette', () {
+    test('de doorvoer wordt door de verwerkingstijd begrensd', () {
+      // De aanloop (0,61 per seconde) is hoger dan wat een level 1-kast
+      // verwerkt (1 klant per 7 seconden): het slijtagebudget van 250
+      // seconden is dan de verdiengrens binnen het uur.
       final result = calculator.apply(
-        singleAtmState(balance: 0),
+        singleAtmState(housing: AtmHousing.ttw, balance: 0),
         const Duration(hours: 1),
       );
-      // De cassette (100 biljetten) is de grens: 100 / 1,5 transacties.
-      const expectedTx = 100 / kAvgNotesPerTransaction;
-      const expected = expectedTx * incomePerTx * kOfflineIncomeFactor;
+      const earningSeconds = 1.0 / kWearPerSecond;
+      final expected =
+          txPerSecond * earningSeconds * incomePerTx * kOfflineIncomeFactor;
       expect(result.income, closeTo(expected, 0.01));
-      expect(result.state.balance, closeTo(expected, 0.01));
-      expect(result.state.atms.first.notesInCassette, 0);
+      // Er blijven biljetten over: de cassette was niet de grens.
+      expect(result.state.atms.first.notesInCassette, greaterThan(0));
+      expect(result.state.atms.first.condition, 0);
     });
 
-    test('met regiomanager is het 75%', () {
-      var s = singleAtmState(balance: 0);
+    test('met regiomanager is het 75% in plaats van 50%', () {
+      final base = calculator.apply(
+        singleAtmState(housing: AtmHousing.ttw, balance: 0),
+        const Duration(hours: 1),
+      );
+      var s = singleAtmState(housing: AtmHousing.ttw, balance: 0);
       s = withStaffHired(s, StaffId.regionalManager);
-      final result = calculator.apply(s, const Duration(hours: 1));
-      const expectedTx = 100 / kAvgNotesPerTransaction;
-      const expected =
-          expectedTx * incomePerTx * kOfflineIncomeFactorRegionalManager;
-      expect(result.income, closeTo(expected, 0.01));
+      final manager = calculator.apply(s, const Duration(hours: 1));
+      expect(
+        manager.income / base.income,
+        closeTo(
+          kOfflineIncomeFactorRegionalManager / kOfflineIncomeFactor,
+          1e-9,
+        ),
+      );
     });
 
     test('slijtage begrenst de verdientijd en loopt offline door', () {
       // Staat 0,1 is na 25 seconden op; daarna stopt het verdienen.
       final result = calculator.apply(
-        singleAtmState(condition: 0.1, balance: 0),
+        singleAtmState(housing: AtmHousing.ttw, condition: 0.1, balance: 0),
         const Duration(hours: 1),
       );
       const earningSeconds = 0.1 / kWearPerSecond;
-      const expected =
+      final expected =
           txPerSecond * earningSeconds * incomePerTx * kOfflineIncomeFactor;
       expect(result.income, closeTo(expected, 0.01));
       expect(result.state.atms.first.condition, 0);
-      const expectedNotes = 100 - drainPerSecond * earningSeconds;
-      expect(result.state.atms.first.notesInCassette, expectedNotes.floor());
+      final expectedNotes = 100 - (drainPerSecond * earningSeconds).ceil();
+      expect(result.state.atms.first.notesInCassette, expectedNotes);
     });
 
     test('een korte afwezigheid rekent alleen de verstreken tijd door', () {
       final result = calculator.apply(
-        singleAtmState(balance: 0),
+        singleAtmState(housing: AtmHousing.ttw, balance: 0),
         const Duration(minutes: 1),
       );
-      const expected = txPerSecond * 60 * incomePerTx * kOfflineIncomeFactor;
+      final expected = txPerSecond * 60 * incomePerTx * kOfflineIncomeFactor;
       expect(result.simulatedSeconds, 60);
       expect(result.income, closeTo(expected, 0.01));
       expect(
         result.state.atms.first.condition,
         closeTo(1 - kWearPerSecond * 60, 1e-9),
       );
+    });
+
+    test('een lobby verdient offline minder door de openingstijden', () {
+      // Op een rustige locatie met een snelle kast (level 5) is de
+      // aanloop de grens, niet de verwerkingstijd: dan telt de demping
+      // buiten openingstijden door in het offline-inkomen. De afwezigheid
+      // is kort zodat de tijd bindt en niet de cassette-inhoud.
+      final lobby = calculator.apply(
+        singleAtmState(location: LocationType.openbaar, level: 5, balance: 0),
+        const Duration(minutes: 2),
+      );
+      final ttw = calculator.apply(
+        singleAtmState(
+          location: LocationType.openbaar,
+          level: 5,
+          housing: AtmHousing.ttw,
+          balance: 0,
+        ),
+        const Duration(minutes: 2),
+      );
+      expect(lobby.income, lessThan(ttw.income));
+      expect(lobby.income, greaterThan(0));
     });
 
     test('niets verstreken betekent geen wijziging', () {
@@ -91,38 +128,23 @@ void main() {
       expect(result.state.atms.first.notesInCassette, 100);
     });
 
-    test('stortingen remmen offline de leegloop van een recycler', () {
+    test('stortingen vullen een recycler offline netto bij', () {
+      // Doorvoer 1/7: 70% opnames drainen 0,15 per seconde, 30%
+      // stortingen vullen 0,17 aan: netto stijgt de voorraad tot de
+      // slijtage het verdienen stopt.
       final result = calculator.apply(
         singleAtmState(
-          tier: AtmTier.ttwRecycler,
-          location: LocationType.reizen,
+          housing: AtmHousing.ttw,
+          function: AtmFunction.recycler,
+          notesInCassette: 50,
           balance: 0,
         ),
         const Duration(hours: 1),
       );
-      // Reizen: factor 1,2. Drain 0,55 x 1,2 x 1,5 = 0,99 per seconde;
-      // stortingen vullen 0,12 x 4 = 0,48 aan: netto 0,51 per seconde.
-      // De cassette van 100 is dan na zo'n 196 seconden leeg - langer dan
-      // zonder recycling - en de slijtage (met stortingsslijtage) loopt
-      // door tot de staat op is.
       expect(result.income, greaterThan(0));
       final atm = result.state.atms.first;
-      expect(atm.notesInCassette, 0);
+      expect(atm.notesInCassette, greaterThan(50));
       expect(atm.condition, 0);
-      // Ter vergelijking: een gewone TTW unit op dezelfde plek is door
-      // dezelfde drain zonder aanvulling eerder leeg en verdient minder.
-      final plain = calculator.apply(
-        singleAtmState(
-          tier: AtmTier.ttwUnit,
-          location: LocationType.reizen,
-          balance: 0,
-        ),
-        const Duration(hours: 1),
-      );
-      expect(plain.state.atms.first.notesInCassette, 0);
-      // Recycler-inkomen per transactie is hoger (tier) plus stortingsfees;
-      // belangrijker: hij verdient langer door. Grofweg dus meer inkomen.
-      expect(result.income, greaterThan(plain.income));
     });
 
     test('een kapotte cassette maakt offline zijn reparatie af', () {
@@ -148,7 +170,7 @@ void main() {
     test('werkende cassettes verdienen door terwijl een kapotte wacht', () {
       // Twee cassettes: een vol en werkend, een in storing. De werkende
       // verdient offline gewoon mee.
-      var s = singleAtmState(balance: 0);
+      var s = singleAtmState(housing: AtmHousing.ttw, balance: 0);
       s = s.withAtm(
         s.atms.first.copyWith(
           cassettes: [
@@ -167,8 +189,9 @@ void main() {
       // De kapotte cassette hield zijn inhoud en storing (5000 > 3600).
       expect(atm.cassettes[1].notes, 50);
       expect(atm.cassettes[1].isBroken, isTrue);
-      // De werkende cassette is leeggetrokken.
-      expect(atm.cassettes[0].notes, 0);
+      // De werkende cassette is deels leeggetrokken (slijtagegrens).
+      expect(atm.cassettes[0].notes, lessThan(100));
+      expect(atm.cassettes[0].notes, greaterThan(0));
     });
 
     test('een wagen onderweg rondt zijn servicing offline af', () {

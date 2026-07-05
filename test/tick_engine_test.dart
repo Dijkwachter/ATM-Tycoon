@@ -1,5 +1,6 @@
 import 'package:atm_empire/core/constants.dart';
 import 'package:atm_empire/engine/tick_engine.dart';
+import 'package:atm_empire/models/atm.dart';
 import 'package:atm_empire/models/cassette.dart';
 import 'package:atm_empire/models/enums.dart';
 import 'package:atm_empire/models/game_state.dart';
@@ -9,109 +10,296 @@ import 'helpers/fake_random.dart';
 import 'helpers/states.dart';
 
 void main() {
-  group('Transacties (GDD 3.1)', () {
-    test('opname volgt de inkomensformule en draineert de cassette', () {
-      // Station om 12 uur: druktefactor 1,0 dus kans 0,55. Script: roll 0,5
-      // slaagt, 1 biljet, spreiding midden (1,1), Bank Oranje (0,90),
-      // geen DCC.
-      final engine = TickEngine(
-        random: FakeRandom(doubles: [0.5, 0.5, 0.0, 0.99], bools: [false]),
-      );
-      final s = engine.tick(singleAtmState(balance: 0));
+  group('Wachtrij en transactiefases (Ontwerper dd 2026-07-04)', () {
+    test(
+      'de voorste klant doorloopt de vier fases en betaalt bij afronding',
+      () {
+        // Level 1: kaart (1) + verwerking (4) + shutter (1) + afronding (1).
+        // Aanloop-rolls missen (0,999); de resolutie is gescript: 1 biljet,
+        // spreiding midden (1,1), Bank Oranje (0,9), geen DCC, geen jam.
+        final engine = TickEngine(
+          random: FakeRandom(
+            doubles: [...arrivalMisses(8), 0.5, 0.0, 0.99, 0.99],
+            bools: [false],
+          ),
+        );
+        var s = withQueue(singleAtmState(balance: 0), 1);
 
-      const expectedIncome = 2.0 * 1.1 * 0.9;
-      expect(s.totalEarned, closeTo(expectedIncome, 1e-9));
-      expect(s.atms.first.notesInCassette, 99);
-      expect(s.atms.first.lifetimeEarned, closeTo(expectedIncome, 1e-9));
-      // Saldo is inkomen minus float-rente over de resterende biljetten.
-      const interest = 99 * kAvgNoteValueEur * kFloatInterestPerSecond;
-      expect(s.balance, closeTo(expectedIncome - interest, 1e-9));
+        s = engine.tick(s);
+        expect(s.atms.first.transaction!.phase, TransactionPhase.cardPresented);
+        expect(s.atms.first.queueLength, 0);
+
+        s = engine.tick(s);
+        expect(s.atms.first.transaction!.phase, TransactionPhase.processing);
+
+        for (var i = 0; i < 3; i++) {
+          s = engine.tick(s);
+          expect(s.atms.first.transaction!.phase, TransactionPhase.processing);
+        }
+        s = engine.tick(s);
+        expect(s.atms.first.transaction!.phase, TransactionPhase.shutterAction);
+
+        s = engine.tick(s);
+        expect(s.atms.first.transaction!.phase, TransactionPhase.finishing);
+
+        // Tot de afronding is er niets verdiend en niets uitgegeven.
+        expect(s.totalEarned, 0);
+        expect(s.atms.first.notesInCassette, kCassetteCapacityUnits);
+
+        s = engine.tick(s);
+        expect(s.atms.first.transaction, isNull);
+        expect(s.totalEarned, closeTo(7.0 * 1.1 * 0.9, 1e-9));
+        expect(s.atms.first.notesInCassette, kCassetteCapacityUnits - 1);
+        expect(s.atms.first.lifetimeEarned, closeTo(7.0 * 1.1 * 0.9, 1e-9));
+      },
+    );
+
+    test('een hoger level verwerkt sneller en verdient meer per klant', () {
+      // Level 5: kaart (1) + verwerking (1) + shutter (1) + afronding (1).
+      final engine = TickEngine(
+        random: FakeRandom(
+          doubles: [...arrivalMisses(5), 0.5, 0.0, 0.99, 0.99],
+          bools: [false],
+        ),
+      );
+      var s = withQueue(singleAtmState(level: 5, balance: 0), 1);
+      expect(s.atms.first.totalServiceTicks, 4);
+      for (var i = 0; i < 5; i++) {
+        s = engine.tick(s);
+      }
+      expect(s.atms.first.transaction, isNull);
+      // Klanttevredenheid level 5: multiplier 1,75.
+      expect(s.totalEarned, closeTo(7.0 * 1.75 * 1.1 * 0.9, 1e-9));
     });
 
-    test('een transactie kan twee biljetten kosten', () {
-      final engine = TickEngine(
-        random: FakeRandom(doubles: [0.5, 0.5, 0.0, 0.99], bools: [true]),
+    test('een klant komt aan en stapt meteen naar de vrije automaat', () {
+      // Station om 12 uur: aanloopkans 0,55; roll 0,5 raakt.
+      final engine = TickEngine(random: FakeRandom(doubles: [0.5]));
+      final s = engine.tick(singleAtmState(balance: 0));
+      expect(s.atms.first.transaction, isNotNull);
+      expect(s.atms.first.queueLength, 0);
+    });
+
+    test('bij een volle rij lopen nieuwe klanten ongeduldig door', () {
+      // Level 1 lobby: maximaal 3 wachtenden.
+      final engine = TickEngine(random: FakeRandom(doubles: [0.5]));
+      var s = singleAtmState(queueLength: 3, balance: 0);
+      expect(s.atms.first.queueCapacity, 3);
+      s = engine.tick(s);
+      expect(s.atms.first.lostCustomers, 1);
+      // De voorste wachtende is wel gewoon begonnen.
+      expect(s.atms.first.transaction, isNotNull);
+      expect(s.atms.first.queueLength, 2);
+    });
+
+    test('wachtrijcapaciteit groeit per level en TTW geeft bonusruimte', () {
+      expect(singleAtmState(level: 1).atms.first.queueCapacity, 3);
+      expect(singleAtmState(level: 5).atms.first.queueCapacity, 15);
+      expect(
+        singleAtmState(
+          level: 1,
+          housing: AtmHousing.ttw,
+        ).atms.first.queueCapacity,
+        3 + kTtwQueueBonus,
       );
-      final s = engine.tick(singleAtmState());
-      expect(s.atms.first.notesInCassette, 98);
+    });
+
+    test('een lobby heeft buiten openingstijden nauwelijks aanloop', () {
+      // Station om 3 uur: factor 0,2. Lobby dicht: kans 0,2 x 0,15 x 0,55
+      // = 0,0165; roll 0,05 mist. TTW: kans 0,11; dezelfde roll raakt.
+      final lobby = TickEngine(
+        random: FakeRandom(doubles: [0.05]),
+      ).tick(singleAtmState(hour: 3, balance: 0));
+      expect(lobby.atms.first.transaction, isNull);
+
+      final ttw = TickEngine(
+        random: FakeRandom(doubles: [0.05]),
+      ).tick(singleAtmState(hour: 3, housing: AtmHousing.ttw, balance: 0));
+      expect(ttw.atms.first.transaction, isNotNull);
     });
 
     test('spreiding gebruikt de grenzen 0,8 en 1,4', () {
-      final low = TickEngine(
-        random: FakeRandom(doubles: [0.5, 0.0, 0.0, 0.99], bools: [false]),
-      ).tick(singleAtmState(balance: 0));
-      expect(low.totalEarned, closeTo(2.0 * kIncomeSpreadMin * 0.9, 1e-9));
+      GameState run(double spreadRoll) {
+        final engine = TickEngine(
+          random: FakeRandom(
+            doubles: [...arrivalMisses(8), spreadRoll, 0.0, 0.99, 0.99],
+            bools: [false],
+          ),
+        );
+        var s = withQueue(singleAtmState(balance: 0), 1);
+        for (var i = 0; i < 8; i++) {
+          s = engine.tick(s);
+        }
+        return s;
+      }
 
-      final high = TickEngine(
-        random: FakeRandom(doubles: [0.5, 1.0, 0.0, 0.99], bools: [false]),
-      ).tick(singleAtmState(balance: 0));
-      expect(high.totalEarned, closeTo(2.0 * kIncomeSpreadMax * 0.9, 1e-9));
+      expect(run(0.0).totalEarned, closeTo(7.0 * kIncomeSpreadMin * 0.9, 1e-9));
+      expect(run(1.0).totalEarned, closeTo(7.0 * kIncomeSpreadMax * 0.9, 1e-9));
     });
 
-    test('geen transactie als de roll boven de kans ligt', () {
-      final engine = TickEngine(random: FakeRandom(doubles: [0.56]));
-      final s = engine.tick(singleAtmState(balance: 0));
-      expect(s.totalEarned, 0);
-      expect(s.atms.first.notesInCassette, 100);
-    });
-
-    test('drukte verhoogt de kans, gecapt op 0,95', () {
-      // Evenement om 20 uur: factor 2,5 geeft 1,375 maar de cap is 0,95.
-      final hit =
-          TickEngine(
-            random: FakeRandom(doubles: [0.94, 0.5, 0.0, 0.99], bools: [false]),
-          ).tick(
-            singleAtmState(
-              location: LocationType.evenement,
-              hour: 20,
-              balance: 0,
-            ),
-          );
-      expect(hit.totalEarned, greaterThan(0));
-
-      final miss = TickEngine(random: FakeRandom(doubles: [0.96])).tick(
-        singleAtmState(location: LocationType.evenement, hour: 20, balance: 0),
-      );
-      expect(miss.totalEarned, 0);
-    });
-
-    test('in het dal is de kans laag', () {
-      // Station om 3 uur: factor 0,2 geeft kans 0,11; roll 0,12 mist.
-      final s = TickEngine(
-        random: FakeRandom(doubles: [0.12]),
-      ).tick(singleAtmState(hour: 3, balance: 0));
-      expect(s.totalEarned, 0);
-    });
-
-    test('een lege cassette levert geen inkomen', () {
+    test('de bank wordt gewogen naar aandeel gekozen', () {
+      // Roll 0,99 valt voorbij Oranje (0,5) en Rivier (0,3): Noorderbank
+      // met tarief 1,35.
       final engine = TickEngine(
-        random: FakeRandom(doubles: [0.1], bools: [false]),
+        random: FakeRandom(
+          doubles: [...arrivalMisses(8), 0.5, 0.99, 0.99, 0.99],
+          bools: [false],
+        ),
       );
-      final s = engine.tick(singleAtmState(notesInCassette: 0, balance: 0));
-      expect(s.totalEarned, 0);
-      expect(s.atms.first.notesInCassette, 0);
+      var s = withQueue(singleAtmState(balance: 0), 1);
+      for (var i = 0; i < 8; i++) {
+        s = engine.tick(s);
+      }
+      expect(s.totalEarned, closeTo(7.0 * 1.1 * 1.35, 1e-9));
     });
 
-    test('onvoldoende biljetten voor de opname: transactie gaat niet door', () {
+    test('onvoldoende voorraad: de klant vangt bot en telt als wegloper', () {
       final engine = TickEngine(
-        random: FakeRandom(doubles: [0.1], bools: [true]),
+        random: FakeRandom(doubles: arrivalMisses(8), bools: [false]),
       );
-      final s = engine.tick(singleAtmState(notesInCassette: 1, balance: 0));
+      var s = withQueue(singleAtmState(notesInCassette: 0, balance: 0), 1);
+      for (var i = 0; i < 8; i++) {
+        s = engine.tick(s);
+      }
       expect(s.totalEarned, 0);
-      expect(s.atms.first.notesInCassette, 1);
+      expect(s.atms.first.lostCustomers, 1);
+      expect(s.atms.first.transaction, isNull);
+    });
+
+    test('een klemgelopen biljet zet de actieve cassette in storing', () {
+      // Jam-roll 0,005 valt onder de dispenserkans van 0,01 op level 1.
+      final engine = TickEngine(
+        random: FakeRandom(
+          doubles: [...arrivalMisses(8), 0.5, 0.0, 0.99, 0.005],
+          bools: [false],
+        ),
+      );
+      var s = withQueue(singleAtmState(balance: 0), 1);
+      for (var i = 0; i < 8; i++) {
+        s = engine.tick(s);
+      }
+      // Het inkomen is wel geboekt; daarna liep het biljet klem.
+      expect(s.totalEarned, greaterThan(0));
+      expect(s.atms.first.hasBrokenCassette, isTrue);
+      expect(s.atms.first.repairSecondsRemaining, kRepairDurationSeconds);
+    });
+
+    test('op hogere levels loopt er minder vaak iets klem', () {
+      // Dezelfde roll 0,005: level 5 dempt de kans naar 0,01 x 0,3 = 0,003.
+      final engine = TickEngine(
+        random: FakeRandom(
+          doubles: [...arrivalMisses(5), 0.5, 0.0, 0.99, 0.005],
+          bools: [false],
+        ),
+      );
+      var s = withQueue(singleAtmState(level: 5, balance: 0), 1);
+      for (var i = 0; i < 5; i++) {
+        s = engine.tick(s);
+      }
+      expect(s.atms.first.hasBrokenCassette, isFalse);
+    });
+  });
+
+  group('DCC (GDD 3.1)', () {
+    GameState run({required LocationType location, required double dccRoll}) {
+      final engine = TickEngine(
+        random: FakeRandom(
+          doubles: [...arrivalMisses(8), 0.5, 0.0, dccRoll, 0.99],
+          bools: [false],
+        ),
+      );
+      var s = withQueue(singleAtmState(location: location, balance: 0), 1);
+      for (var i = 0; i < 8; i++) {
+        s = engine.tick(s);
+      }
+      return s;
+    }
+
+    test('toeristische locatie: 14% kans op 4 euro extra', () {
+      final s = run(location: LocationType.station, dccRoll: 0.13);
+      expect(s.totalEarned, closeTo(7.0 * 1.1 * 0.9 + kDccBonusEur, 1e-9));
+    });
+
+    test('normale locatie: dezelfde roll geeft geen DCC', () {
+      final s = run(location: LocationType.winkel, dccRoll: 0.13);
+      expect(s.totalEarned, closeTo(7.0 * 1.1 * 0.9, 1e-9));
+    });
+
+    test('normale locatie: onder 5% wel DCC', () {
+      final s = run(location: LocationType.winkel, dccRoll: 0.04);
+      expect(s.totalEarned, closeTo(7.0 * 1.1 * 0.9 + kDccBonusEur, 1e-9));
+    });
+  });
+
+  group('Stortingen op recyclers (Ontwerper dd 2026-07-04)', () {
+    test('een storting betaalt de fee en vult de leegste cassette bij', () {
+      // Start: aanloop mist (0,999), stortingsbeslissing 0,25 < 0,3.
+      // Resolutie: 2 + 2 biljetten (ints [2]), geen jam.
+      final engine = TickEngine(
+        random: FakeRandom(
+          doubles: [0.999, 0.25, ...arrivalMisses(7), 0.99],
+          ints: [2],
+        ),
+      );
+      var s = withQueue(
+        singleAtmState(
+          function: AtmFunction.recycler,
+          notesInCassette: 90,
+          balance: 0,
+        ),
+        1,
+      );
+      for (var i = 0; i < 8; i++) {
+        s = engine.tick(s);
+      }
+      expect(s.atms.first.notesInCassette, 94);
+      expect(s.totalEarned, closeTo(kRecyclerDepositFee, 1e-9));
+      // Acht ticks basisslijtage plus de stortingsslijtage.
+      expect(
+        s.atms.first.condition,
+        closeTo(1 - 8 * kWearPerSecond - kRecyclerWearPerDeposit, 1e-9),
+      );
+    });
+
+    test('een storting kan de cassettecapaciteit niet overschrijden', () {
+      final engine = TickEngine(
+        random: FakeRandom(
+          doubles: [0.999, 0.25, ...arrivalMisses(7), 0.99],
+          ints: [4],
+        ),
+      );
+      var s = withQueue(
+        singleAtmState(
+          function: AtmFunction.recycler,
+          notesInCassette: kCassetteCapacityUnits - 1,
+          balance: 0,
+        ),
+        1,
+      );
+      for (var i = 0; i < 8; i++) {
+        s = engine.tick(s);
+      }
+      expect(s.atms.first.notesInCassette, kCassetteCapacityUnits);
+    });
+
+    test('een dispenser krijgt nooit stortingen', () {
+      // Op een dispenser wordt de stortingsbeslissing niet eens gerold:
+      // dezelfde wachtrij levert een opname op.
+      final engine = TickEngine(
+        random: FakeRandom(
+          doubles: [...arrivalMisses(8), 0.5, 0.0, 0.99, 0.99],
+          bools: [false],
+        ),
+      );
+      var s = withQueue(singleAtmState(balance: 0), 1);
+      for (var i = 0; i < 8; i++) {
+        s = engine.tick(s);
+      }
+      expect(s.atms.first.notesInCassette, kCassetteCapacityUnits - 1);
     });
   });
 
   group('Banktarieven (GDD 8)', () {
-    test('de bank wordt gewogen naar aandeel gekozen', () {
-      // Roll 0,99 valt voorbij Oranje (0,5) en Rivier (0,3): Noorderbank
-      // met tarief 1,35.
-      final s = TickEngine(
-        random: FakeRandom(doubles: [0.5, 0.5, 0.99, 0.99], bools: [false]),
-      ).tick(singleAtmState(balance: 0));
-      expect(s.totalEarned, closeTo(2.0 * 1.1 * 1.35, 1e-9));
-    });
-
     test('heronderhandelen verhoogt het tarief met 0,05 per level', () {
       final engine = TickEngine(random: FakeRandom());
       var s = singleAtmState(balance: 500);
@@ -164,9 +352,17 @@ void main() {
   });
 
   group('Slijtage en reparatie (GDD 4)', () {
-    test('de staat daalt met 0,004 per seconde', () {
+    test('de staat daalt met 0,004 per seconde op level 1', () {
       final s = TickEngine(random: FakeRandom()).tick(singleAtmState());
       expect(s.atms.first.condition, closeTo(1 - kWearPerSecond, 1e-9));
+    });
+
+    test('hogere levels slijten langzamer (betrouwbaarheid)', () {
+      final s = TickEngine(random: FakeRandom()).tick(singleAtmState(level: 5));
+      expect(
+        s.atms.first.condition,
+        closeTo(1 - kWearPerSecond * kLevelWearFactor[4], 1e-9),
+      );
     });
 
     test('IBNS vertraagt de slijtage met 12% per level', () {
@@ -188,39 +384,46 @@ void main() {
       ).tick(singleAtmState(condition: kWearPerSecond, balance: 100));
       expect(s.atms.first.isBroken, isTrue);
       expect(s.atms.first.repairSecondsRemaining, kRepairDurationSeconds);
-      // Lobby basic: voorrijkosten 40 + 20 x tier 0 = 40, plus de
-      // float-rente over de onaangeroerde 100 biljetten.
+      // Lobby dispenser level 1: voorrijkosten 40, plus de float-rente
+      // over de onaangeroerde 100 biljetten.
       const interest = 100 * kAvgNoteValueEur * kFloatInterestPerSecond;
       expect(s.balance, closeTo(100 - kBreakdownCalloutBase - interest, 1e-9));
     });
 
-    test('voorrijkosten schalen met tier en IBNS geeft korting', () {
+    test('TTW en recycler maken de nood-trip duurder; IBNS geeft korting', () {
       var state = singleAtmState(
-        tier: AtmTier.ttwUnit,
+        housing: AtmHousing.ttw,
+        function: AtmFunction.recycler,
         condition: kWearPerSecond,
         balance: 1000,
       );
       state = withUpgradeLevel(state, UpgradeId.ibns, 1);
-      final s = TickEngine(random: FakeRandom()).tick(state);
-      // (40 + 20 x 2) x (1 - 0,08) = 73,6; maar IBNS vertraagt ook de
-      // slijtage, dus de automaat valt met deze startstaat nog niet uit.
-      expect(s.atms.first.isBroken, isFalse);
+      // IBNS vertraagt ook de slijtage, dus deze startstaat breekt nog
+      // net niet; een fractie lager wel.
+      final notYet = TickEngine(random: FakeRandom()).tick(state);
+      expect(notYet.atms.first.isBroken, isFalse);
 
-      final justBreaking = TickEngine(random: FakeRandom()).tick(
-        withUpgradeLevel(
-          singleAtmState(
-            tier: AtmTier.ttwUnit,
-            condition: 0.0001,
-            balance: 1000,
-          ),
-          UpgradeId.ibns,
-          1,
-        ),
-      );
-      expect(justBreaking.atms.first.isBroken, isTrue);
+      final breaking = TickEngine(
+        random: FakeRandom(),
+      ).tick(withFirstCassette(state, condition: 0.0001));
+      expect(breaking.atms.first.isBroken, isTrue);
+      // (40 + 20 + 20) x levelfactor 1,0 x IBNS-korting 0,92.
       const interest =
           kCassetteCapacityUnits * kAvgNoteValueEur * kFloatInterestPerSecond;
-      expect(justBreaking.balance, closeTo(1000 - 80 * 0.92 - interest, 1e-9));
+      expect(breaking.balance, closeTo(1000 - 80 * 0.92 - interest, 1e-9));
+    });
+
+    test('het beveiligingslevel halveert de nood-trip op level 5', () {
+      final s = TickEngine(
+        random: FakeRandom(),
+      ).tick(singleAtmState(level: 5, condition: 0.0001, balance: 100));
+      expect(s.atms.first.isBroken, isTrue);
+      const interest =
+          kCassetteCapacityUnits * kAvgNoteValueEur * kFloatInterestPerSecond;
+      expect(
+        s.balance,
+        closeTo(100 - kBreakdownCalloutBase * 0.5 - interest, 1e-9),
+      );
     });
 
     test('voorrijkosten brengen het saldo nooit onder nul', () {
@@ -281,77 +484,6 @@ void main() {
     });
   });
 
-  group('DCC (GDD 3.1)', () {
-    test('toeristische locatie: 14% kans op 4 euro extra', () {
-      final s = TickEngine(
-        random: FakeRandom(doubles: [0.5, 0.5, 0.0, 0.13], bools: [false]),
-      ).tick(singleAtmState(balance: 0));
-      expect(s.totalEarned, closeTo(2.0 * 1.1 * 0.9 + kDccBonusEur, 1e-9));
-    });
-
-    test('normale locatie: dezelfde roll geeft geen DCC', () {
-      // Winkel om 12 uur is geen toeristische locatie; 0,13 > 0,05.
-      final s = TickEngine(
-        random: FakeRandom(doubles: [0.5, 0.5, 0.0, 0.13], bools: [false]),
-      ).tick(singleAtmState(location: LocationType.winkel, balance: 0));
-      expect(s.totalEarned, closeTo(2.0 * 1.1 * 0.9, 1e-9));
-    });
-
-    test('normale locatie: onder 5% wel DCC', () {
-      final s = TickEngine(
-        random: FakeRandom(doubles: [0.5, 0.5, 0.0, 0.04], bools: [false]),
-      ).tick(singleAtmState(location: LocationType.winkel, balance: 0));
-      expect(s.totalEarned, closeTo(2.0 * 1.1 * 0.9 + kDccBonusEur, 1e-9));
-    });
-  });
-
-  group('Stortingen op recyclers (GDD 3.1 en 4)', () {
-    test('storting: fee, biljetten terug en extra slijtage', () {
-      // Transactieroll mist (0,96), stortingsroll 0,05 slaagt, 2 + 2
-      // biljetten.
-      final s =
-          TickEngine(
-            random: FakeRandom(doubles: [0.96, 0.05], ints: [2]),
-          ).tick(
-            singleAtmState(
-              tier: AtmTier.ttwRecycler,
-              notesInCassette: 90,
-              balance: 0,
-            ),
-          );
-      expect(s.atms.first.notesInCassette, 94);
-      expect(
-        s.atms.first.condition,
-        closeTo(1 - kWearPerSecond - kRecyclerWearPerDeposit, 1e-9),
-      );
-      const interest = 94 * kAvgNoteValueEur * kFloatInterestPerSecond;
-      expect(s.balance, closeTo(kDepositFeeEur - interest, 1e-9));
-      expect(s.totalEarned, kDepositFeeEur);
-    });
-
-    test('een storting kan de cassettecapaciteit niet overschrijden', () {
-      final s =
-          TickEngine(
-            random: FakeRandom(doubles: [0.96, 0.05], ints: [4]),
-          ).tick(
-            singleAtmState(
-              tier: AtmTier.ttwRecycler,
-              notesInCassette: kCassetteCapacityUnits - 1,
-            ),
-          );
-      expect(s.atms.first.notesInCassette, kCassetteCapacityUnits);
-    });
-
-    test('alleen recyclers accepteren stortingen', () {
-      // Voor een gewone TTW unit wordt de stortingsroll niet eens
-      // geconsumeerd; met dezelfde queue blijft het saldo op nul.
-      final s = TickEngine(
-        random: FakeRandom(doubles: [0.96, 0.05], ints: [2]),
-      ).tick(singleAtmState(tier: AtmTier.ttwUnit, balance: 0));
-      expect(s.totalEarned, 0);
-    });
-  });
-
   group('Float-rente (GDD 3.2)', () {
     test('rente loopt over de cashwaarde van alle cassettes', () {
       final s = TickEngine(
@@ -370,32 +502,32 @@ void main() {
   });
 
   group('Events (GDD 6)', () {
-    test('Koningsdag verdubbelt de drukte van alle automaten', () {
-      final engine = TickEngine(
-        random: FakeRandom(doubles: [0.94, 0.5, 0.0, 0.99], bools: [false]),
-      );
+    test('Koningsdag verdubbelt de aanloop van alle automaten', () {
+      // Zonder event mist roll 0,94 (kans 0,55); met Koningsdag is de
+      // kans 2 x 0,55 gecapt op 0,95 en raakt dezelfde roll.
       var s = singleAtmState(balance: 0);
-      // Zonder event zou roll 0,94 missen (kans 0,55).
       expect(
-        TickEngine(random: FakeRandom(doubles: [0.94])).tick(s).totalEarned,
-        0,
+        TickEngine(
+          random: FakeRandom(doubles: [0.94]),
+        ).tick(s).atms.first.transaction,
+        isNull,
       );
+      final engine = TickEngine(random: FakeRandom(doubles: [0.94]));
       s = engine.fireEvent(s, GameEventType.kingsday);
       expect(s.activeEvent!.type, GameEventType.kingsday);
       final after = engine.tick(s);
-      expect(after.totalEarned, greaterThan(0));
+      expect(after.atms.first.transaction, isNotNull);
     });
 
     test('festival verdrievoudigt alleen de doellocatie', () {
       final engine = TickEngine(random: FakeRandom(ints: [0]));
-      var s = singleAtmState(hour: 3, balance: 0);
+      var s = singleAtmState(hour: 3, housing: AtmHousing.ttw, balance: 0);
       s = engine.fireEvent(s, GameEventType.festival);
       expect(s.activeEvent!.targetAtmId, 0);
-      // Station om 3 uur: factor 0,2 x 3 = 0,6; roll 0,32 slaagt nu wel.
-      final hit = TickEngine(
-        random: FakeRandom(doubles: [0.32, 0.5, 0.0, 0.99], bools: [false]),
-      ).tick(s);
-      expect(hit.totalEarned, greaterThan(0));
+      // Station om 3 uur: factor 0,2 x 3 = 0,6; aanloopkans 0,33 en roll
+      // 0,32 raakt nu wel.
+      final hit = TickEngine(random: FakeRandom(doubles: [0.32])).tick(s);
+      expect(hit.atms.first.transaction, isNotNull);
     });
 
     test('festival zonder toeristische locatie doet niets', () {
@@ -407,13 +539,14 @@ void main() {
       expect(s.activeEvent, isNull);
     });
 
-    test('stroomstoring pauzeert 20 seconden zonder kosten of slijtage', () {
+    test('stroomstoring pauzeert 20 seconden en de rij loopt weg', () {
       final engine = TickEngine(random: FakeRandom());
       var s = engine.fireEvent(
-        singleAtmState(balance: 50),
+        singleAtmState(balance: 50, queueLength: 2),
         GameEventType.powerOutage,
       );
       expect(s.atms.first.outageSecondsRemaining, kPowerOutageDurationSeconds);
+      expect(s.atms.first.queueLength, 0);
       for (var i = 0; i < kPowerOutageDurationSeconds; i++) {
         s = engine.tick(s);
       }
@@ -422,7 +555,8 @@ void main() {
       expect(s.totalEarned, 0);
     });
 
-    test('plofkraak zonder IBNS: een reparatiecyclus offline, geen kosten', () {
+    test('plofkraak zonder IBNS op level 1: hele automaat offline', () {
+      // Level 1 heeft blokkeerkans 0: de default-roll slaat niets af.
       final engine = TickEngine(random: FakeRandom());
       final s = engine.fireEvent(
         singleAtmState(balance: 200),
@@ -431,6 +565,29 @@ void main() {
       expect(s.atms.first.isBroken, isTrue);
       expect(s.atms.first.repairSecondsRemaining, kRepairDurationSeconds);
       expect(s.balance, 200);
+    });
+
+    test('level 5 beveiliging slaat een plofkraak zelf af', () {
+      // Blokkeerkans op level 5 is 0,6; roll 0,5 wordt afgeslagen, zonder
+      // verzekeringsuitkering.
+      final engine = TickEngine(random: FakeRandom(doubles: [0.5]));
+      final s = engine.fireEvent(
+        singleAtmState(level: 5, balance: 200),
+        GameEventType.heistAttempt,
+      );
+      expect(s.atms.first.isBroken, isFalse);
+      expect(s.balance, 200);
+    });
+
+    test('een lobby is buiten openingstijden kwetsbaarder', () {
+      // Zelfde level 5 en dezelfde roll 0,5, maar om 23 uur is de
+      // blokkeerkans gehalveerd (0,3): de aanval slaagt.
+      final engine = TickEngine(random: FakeRandom(doubles: [0.5]));
+      final s = engine.fireEvent(
+        singleAtmState(level: 5, hour: 23, balance: 200),
+        GameEventType.heistAttempt,
+      );
+      expect(s.atms.first.isBroken, isTrue);
     });
 
     test('plofkraak met IBNS: afgeslagen en verzekering keert uit', () {
@@ -474,8 +631,9 @@ void main() {
       Cassette first = const Cassette.full(),
       Cassette second = const Cassette.full(),
       double balance = 1000,
+      int queueLength = 0,
     }) {
-      final s = singleAtmState(balance: balance);
+      final s = singleAtmState(balance: balance, queueLength: queueLength);
       return s.withAtm(s.atms.first.copyWith(cassettes: [first, second]));
     }
 
@@ -515,21 +673,26 @@ void main() {
 
     test('opnames trekken uit de volste cassette', () {
       final engine = TickEngine(
-        random: FakeRandom(doubles: [0.5, 0.5, 0.0, 0.99], bools: [false]),
-      );
-      final s = engine.tick(
-        twoCassetteState(
-          first: const Cassette(notes: 40, condition: 1.0),
-          second: const Cassette(notes: 80, condition: 1.0),
+        random: FakeRandom(
+          doubles: [...arrivalMisses(8), 0.5, 0.0, 0.99, 0.99],
+          bools: [false],
         ),
       );
+      var s = twoCassetteState(
+        first: const Cassette(notes: 40, condition: 1.0),
+        second: const Cassette(notes: 80, condition: 1.0),
+        queueLength: 1,
+      );
+      for (var i = 0; i < 8; i++) {
+        s = engine.tick(s);
+      }
       expect(s.atms.first.cassettes[0].notes, 40);
       expect(s.atms.first.cassettes[1].notes, 79);
     });
 
-    test('een kapotte cassette halveert de transactiekans van twee slots', () {
-      // Station om 12 uur: kans 0,55; met 1 van 2 cassettes werkend is dat
-      // 0,275. Roll 0,3 mist dan, terwijl hij zonder storing zou raken.
+    test('een kapotte cassette halveert de aanloop van twee slots', () {
+      // Station om 12 uur: kans 0,55; met 1 van 2 cassettes werkend is
+      // dat 0,275. Roll 0,3 mist dan, terwijl hij zonder storing raakt.
       const broken = Cassette(
         notes: 50,
         condition: 0.5,
@@ -538,15 +701,12 @@ void main() {
       final miss = TickEngine(
         random: FakeRandom(doubles: [0.3]),
       ).tick(twoCassetteState(first: broken, balance: 0));
-      expect(miss.totalEarned, 0);
+      expect(miss.atms.first.transaction, isNull);
 
       final hit = TickEngine(
-        random: FakeRandom(doubles: [0.2, 0.5, 0.0, 0.99], bools: [false]),
+        random: FakeRandom(doubles: [0.2]),
       ).tick(twoCassetteState(first: broken, balance: 0));
-      expect(hit.totalEarned, greaterThan(0));
-      // De opname komt uit de werkende cassette.
-      expect(hit.atms.first.cassettes[1].notes, 99);
-      expect(hit.atms.first.cassettes[0].notes, 50);
+      expect(hit.atms.first.transaction, isNotNull);
     });
 
     test('kapotte cassettes tellen niet mee als voorraad', () {
@@ -697,7 +857,7 @@ void main() {
       final engine = TickEngine(random: FakeRandom());
       var s = GameState.initial(
         nextEventInSeconds: 1000000,
-      ).copyWith(balance: 5000);
+      ).copyWith(balance: 5000, totalEarned: 100000);
       s = engine.buyAtm(s, LocationType.station);
       s = engine.buyAtm(s, LocationType.winkel);
       s = withFirstCassette(s, notes: 0);
@@ -839,6 +999,69 @@ void main() {
         expect(kLocationMapPoints[location], isNotNull);
         expect(kZoneTravelTicks[kLocationZone[location]!], isNotNull);
       }
+    });
+  });
+
+  group('Modulaire aankoop (Ontwerper dd 2026-07-04)', () {
+    test('behuizing en functionaliteit bepalen de meerprijs', () {
+      final engine = TickEngine(random: FakeRandom());
+      var s = GameState.initial(
+        nextEventInSeconds: 1000000,
+      ).copyWith(balance: 10000, totalEarned: 100000);
+      expect(s.nextAtmPrice, 400);
+      s = engine.buyAtm(
+        s,
+        LocationType.station,
+        housing: AtmHousing.ttw,
+        function: AtmFunction.recycler,
+      );
+      expect(s.atms.length, 1);
+      expect(
+        s.balance,
+        10000 - 400 - kTtwHousingPremium - kRecyclerFunctionPremium,
+      );
+      final atm = s.atms.single;
+      expect(atm.housing, AtmHousing.ttw);
+      expect(atm.function, AtmFunction.recycler);
+      expect(atm.level, 1);
+      expect(atm.cassettes.single.notes, kCassetteCapacityUnits);
+    });
+
+    test('onvoldoende saldo voor de configuratie: geen aankoop', () {
+      final engine = TickEngine(random: FakeRandom());
+      final s = GameState.initial(
+        nextEventInSeconds: 1000000,
+      ).copyWith(balance: 500);
+      // Basis (400) past, maar TTW recycler (800) niet.
+      final refused = engine.buyAtm(
+        s,
+        LocationType.station,
+        housing: AtmHousing.ttw,
+        function: AtmFunction.recycler,
+      );
+      expect(refused.atms, isEmpty);
+      expect(refused.balance, 500);
+    });
+
+    test('levelupgrades volgen de kostentabel tot het maximum', () {
+      final engine = TickEngine(random: FakeRandom());
+      var s = singleAtmState(notesInCassette: 42, balance: 400);
+      expect(s.atms.first.nextLevelCost, kLevelUpgradeCost[0]);
+      s = engine.upgradeAtm(s, 0);
+      expect(s.atms.first.level, 2);
+      expect(s.balance, 50);
+      // De cassette-inhoud blijft staan.
+      expect(s.atms.first.notesInCassette, 42);
+      // Volgende stap kost 840: onvoldoende saldo, geen wijziging.
+      expect(engine.upgradeAtm(s, 0).atms.first.level, 2);
+
+      // Tot en met level 5; daarna is er geen upgrade meer.
+      s = s.copyWith(balance: 1000000);
+      for (var i = 0; i < 10; i++) {
+        s = engine.upgradeAtm(s, 0);
+      }
+      expect(s.atms.first.level, Atm.kMaxAtmLevel);
+      expect(s.atms.first.nextLevelCost, isNull);
     });
   });
 }

@@ -26,11 +26,15 @@ void main() {
     await tester.pump();
   }
 
-  /// Koopt vanaf de kaart een automaat op het station.
+  /// Koopt vanaf de kaart een automaat op het station: locatie kiezen op
+  /// de landkaart en de configurator bevestigen (standaard lobby
+  /// dispenser).
   Future<void> buyStationAtm(WidgetTester tester) async {
     await tester.tap(find.text('Nieuwe automaat'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Station'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Plaats automaat'));
     await tester.pumpAndSettle();
   }
 
@@ -78,7 +82,8 @@ void main() {
 
     expect(find.textContaining('Station'), findsOneWidget);
     expect(find.text('Servicing'), findsOneWidget);
-    expect(find.text('Upgrade'), findsOneWidget);
+    // De volgende levelupgrade staat klaar op de tegel.
+    expect(find.text('Level 2'), findsOneWidget);
 
     await tearDownApp(tester);
   });
@@ -125,7 +130,7 @@ void main() {
 
     await tester.tap(find.textContaining('Station'));
     await tester.pumpAndSettle();
-    expect(find.text('Inkomen per transactie'), findsOneWidget);
+    expect(find.text('Inkomen per opname'), findsOneWidget);
     expect(find.text('Etmaalgemiddelde'), findsOneWidget);
     // Basis-cassette in echte biljetten: capaciteit 2.000 (kNotesPerUnit);
     // er kan al een opname geweest zijn, dus de stand zelf ligt niet vast.

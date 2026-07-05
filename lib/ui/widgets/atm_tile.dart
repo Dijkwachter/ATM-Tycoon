@@ -9,10 +9,13 @@ import '../format.dart';
 import '../theme.dart';
 import 'tactile_button.dart';
 
-/// Automaat-tegel (GDD 10): een gele kast in de headergradient, volle
-/// breedte, met automaat-anatomie, cassetteslots, voorraad- en
-/// slijtagebalk en drie actieknoppen. Een druk- of rustig-label toont de
-/// dagcyclus (GDD 5).
+/// Automaat-tegel (GDD 10, levende simulatie Ontwerper dd 2026-07-04):
+/// een scene waarin klanten komen aanlopen, in de rij staan en de
+/// transactie-choreografie doorlopen (kaart, verwerking, shutter,
+/// afronding), boven de cassetteslots, voorraad- en slijtagebalk en de
+/// drie actieknoppen. De kast groeit visueel mee van een vergeelde
+/// plastic doos (level 1) naar een Quantum Node met glazen kap en
+/// neonstrips (level 5).
 class AtmTile extends StatelessWidget {
   const AtmTile({
     super.key,
@@ -48,15 +51,21 @@ class AtmTile extends StatelessWidget {
     return null;
   }
 
-  /// Minuten tot de voorraad leeg is bij de huidige drukte.
+  /// Minuten tot de voorraad leeg is bij de huidige doorvoer.
   double get _minutesUntilEmpty {
-    final chance =
+    final arrivals =
         (kTransactionChancePerSecond * _busyFactor).clamp(
           0.0,
           kTransactionChanceCap,
         ) *
         atm.workingFraction;
-    var drainPerSecond = chance * kAvgNotesPerTransaction;
+    final throughput = arrivals < 1 / atm.totalServiceTicks
+        ? arrivals
+        : 1 / atm.totalServiceTicks;
+    var drainPerSecond =
+        throughput *
+        (atm.isRecycler ? 1 - kRecyclerDepositShare : 1) *
+        kAvgNotesPerTransaction;
     if (state.hundredEuroNoteActive) {
       drainPerSecond *= kHundredEuroNoteDrainMultiplier;
     }
@@ -66,10 +75,10 @@ class AtmTile extends StatelessWidget {
     return atm.availableNotes / drainPerSecond / 60;
   }
 
-  /// Kast-uiterlijk per tier: de instapkast is vlak geel, vanaf lobby plus
-  /// glanst de gradient, de TTW-units krijgen een stalen muurframe en de
-  /// recycler gloeit goud. AnimatedContainer laat een upgrade vloeiend
-  /// overgaan in de nieuwe kast.
+  /// Kast-uiterlijk per level (Ontwerper dd 2026-07-04): van vergeeld
+  /// beige plastic (1) via geel en staal naar de donkere carbon Quantum
+  /// Node met neon-gele gloed (5). AnimatedContainer laat een upgrade
+  /// vloeiend overgaan.
   BoxDecoration _cabinetDecoration() {
     final radius = BorderRadius.circular(16);
     const dropShadow = BoxShadow(
@@ -77,36 +86,45 @@ class AtmTile extends StatelessWidget {
       blurRadius: 5,
       offset: Offset(0, 2),
     );
-    return switch (atm.tier) {
-      AtmTier.lobbyBasic => BoxDecoration(
+    return switch (atm.level) {
+      1 => BoxDecoration(
+        color: const Color(0xFFE8DCC0),
+        borderRadius: radius,
+        border: Border.all(color: const Color(0xFFC9BA97), width: 1),
+        boxShadow: const [dropShadow],
+      ),
+      2 => BoxDecoration(
         color: AppColors.cabinetBasic,
         borderRadius: radius,
         border: Border.all(color: AppColors.cabinetShade, width: 1),
         boxShadow: const [dropShadow],
       ),
-      AtmTier.lobbyPlus => BoxDecoration(
+      3 => BoxDecoration(
         gradient: kHeaderGradient,
         borderRadius: radius,
         border: Border.all(color: AppColors.cabinetShade, width: 1),
         boxShadow: const [dropShadow],
       ),
-      AtmTier.ttwUnit => BoxDecoration(
+      4 => BoxDecoration(
         gradient: kHeaderGradient,
         borderRadius: radius,
         border: Border.all(color: AppColors.steel, width: 5),
         boxShadow: const [dropShadow],
       ),
-      AtmTier.ttwRecycler => BoxDecoration(
-        gradient: kHeaderGradient,
+      _ => BoxDecoration(
+        color: const Color(0xFF2E2A22),
         borderRadius: radius,
         border: Border.all(color: AppColors.steel, width: 5),
         boxShadow: const [
           dropShadow,
-          BoxShadow(color: Color(0x66FFD75E), blurRadius: 14),
+          BoxShadow(color: Color(0x88FFD75E), blurRadius: 16),
         ],
       ),
     };
   }
+
+  /// Tekstkleur die leesbaar blijft op de donkere level 5-kast.
+  Color get _inkOnCabinet => atm.level >= 5 ? AppColors.ledGlow : AppColors.ink;
 
   @override
   Widget build(BuildContext context) {
@@ -121,19 +139,20 @@ class AtmTile extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            _TitleRow(atm: atm, busyFactor: _busyFactor),
+            _TitleRow(atm: atm, busyFactor: _busyFactor, ink: _inkOnCabinet),
             const SizedBox(height: 8),
-            _Anatomy(atm: atm, state: state, incomingVan: _incomingVan),
+            _LiveScene(atm: atm, state: state, incomingVan: _incomingVan),
             const SizedBox(height: 10),
-            _CassetteSlots(atm: atm),
+            _CassetteSlots(atm: atm, ink: _inkOnCabinet),
             const SizedBox(height: 6),
             _CassetteBar(
               notes: atm.availableNotes,
               capacity: atm.capacity,
               minutesUntilEmpty: _minutesUntilEmpty,
+              ink: _inkOnCabinet,
             ),
             const SizedBox(height: 6),
-            _WearBar(atm: atm),
+            _WearBar(atm: atm, ink: _inkOnCabinet),
             const SizedBox(height: 10),
             Row(
               children: [
@@ -203,12 +222,11 @@ class AtmTile extends StatelessWidget {
   }
 
   Widget _upgradeButton() {
-    final next = atm.tier.next;
-    final cost = next == null ? null : kTierUpgradeCost[next.index];
+    final cost = atm.nextLevelCost;
     final canUpgrade = cost != null && state.balance >= cost;
     return TactileButton(
-      label: 'Upgrade',
-      sublabel: cost == null ? 'max' : formatEuroCompact(cost),
+      label: cost == null ? 'Level max' : 'Level ${atm.level + 1}',
+      sublabel: cost == null ? 'Quantum Node' : formatEuroCompact(cost),
       color: AppColors.ledPanel,
       textColor: AppColors.ledGlow,
       onPressed: canUpgrade ? onUpgrade : null,
@@ -217,17 +235,15 @@ class AtmTile extends StatelessWidget {
 }
 
 class _TitleRow extends StatelessWidget {
-  const _TitleRow({required this.atm, required this.busyFactor});
+  const _TitleRow({
+    required this.atm,
+    required this.busyFactor,
+    required this.ink,
+  });
 
   final Atm atm;
   final double busyFactor;
-
-  static const _tierNames = [
-    'Lobby basic',
-    'Lobby plus',
-    'TTW unit',
-    'TTW recycler',
-  ];
+  final Color ink;
 
   static const _locationNames = {
     LocationType.station: 'Station',
@@ -241,25 +257,28 @@ class _TitleRow extends StatelessWidget {
     LocationType.openbaar: 'Openbaar',
   };
 
+  String get _configName =>
+      '${atm.housing == AtmHousing.ttw ? 'TTW' : 'Lobby'}'
+      ' ${atm.isRecycler ? 'recycler' : 'dispenser'}';
+
   @override
   Widget build(BuildContext context) {
     return Row(
       children: [
         Expanded(
           child: Text(
-            '${_locationNames[atm.location]} - '
-            '${_tierNames[atm.tier.index]}',
+            '${_locationNames[atm.location]} - $_configName',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
+            style: TextStyle(
               fontFamily: kTextFont,
               fontWeight: FontWeight.w700,
               fontSize: 14,
-              color: AppColors.ink,
+              color: ink,
             ),
           ),
         ),
-        _TierPips(tier: atm.tier),
+        _LevelPips(level: atm.level, ink: ink),
         const SizedBox(width: 6),
         if (busyFactor >= 1.2)
           const _BusyLabel(label: 'druk', color: AppColors.incomePill)
@@ -270,27 +289,25 @@ class _TitleRow extends StatelessWidget {
   }
 }
 
-/// Vier pips die de tier-voortgang van deze kast tonen: gevuld tot en met
-/// de huidige tier, gedoofd daarboven.
-class _TierPips extends StatelessWidget {
-  const _TierPips({required this.tier});
+/// Vijf pips die het upgradelevel van deze kast tonen.
+class _LevelPips extends StatelessWidget {
+  const _LevelPips({required this.level, required this.ink});
 
-  final AtmTier tier;
+  final int level;
+  final Color ink;
 
   @override
   Widget build(BuildContext context) {
     return Row(
       children: [
-        for (final t in AtmTier.values)
+        for (var i = 1; i <= Atm.kMaxAtmLevel; i++)
           Container(
             width: 6,
             height: 6,
             margin: const EdgeInsets.only(left: 3),
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: t.index <= tier.index
-                  ? AppColors.ink
-                  : AppColors.ink.withValues(alpha: 0.18),
+              color: i <= level ? ink : ink.withValues(alpha: 0.18),
             ),
           ),
       ],
@@ -325,11 +342,15 @@ class _BusyLabel extends StatelessWidget {
   }
 }
 
-/// De automaat-anatomie (GDD 10): donker schermpje met status en verdiend
-/// bedrag in LED-cijfers, pinpad van zes donkere toetsen, pasjessleuf en
-/// geldsleuf met donkere geleiders.
-class _Anatomy extends StatelessWidget {
-  const _Anatomy({required this.atm, required this.state, this.incomingVan});
+/// De levende scene (Ontwerper dd 2026-07-04): een straatje of hal met de
+/// wachtrij links en de automaat rechts. Klanten schuiven met implicit
+/// animations naar hun plek; de voorste doorloopt de choreografie van
+/// [TransactionPhase]. De machine zelf toont een kaartlezer die knippert,
+/// een scherm met laad-indicator en de shutter: smal en discreet op een
+/// dispenser, een dubbel zo grote gemotoriseerde klep met groene gloed op
+/// een recycler.
+class _LiveScene extends StatelessWidget {
+  const _LiveScene({required this.atm, required this.state, this.incomingVan});
 
   final Atm atm;
   final GameState state;
@@ -354,179 +375,407 @@ class _Anatomy extends StatelessWidget {
     if (incomingVan != null) {
       return 'CIT ONDERWEG ${incomingVan!.ticksRemaining}s';
     }
-    return 'IN BEDRIJF';
+    return switch (atm.transaction?.phase) {
+      TransactionPhase.cardPresented => 'PAS AANGEBODEN',
+      TransactionPhase.processing => 'VERWERKEN...',
+      TransactionPhase.shutterAction =>
+        atm.transaction!.isDeposit ? 'STORTING TELT' : 'GELD UITGEVEN',
+      TransactionPhase.finishing => 'KLAAR',
+      null => 'IN BEDRIJF',
+    };
   }
 
   @override
   Widget build(BuildContext context) {
+    final phase = atm.transaction?.phase;
     final alert =
         atm.isBroken ||
         atm.isPausedByOutage ||
         atm.hasBrokenCassette ||
         atm.availableNotes == 0;
-    final tier = atm.tier;
-    // De anatomie groeit mee met de tier: vanaf lobby plus een derde
-    // toetsenrij en contactless, vanaf TTW een camera, en alleen de
-    // recycler heeft een stortsleuf (GDD 3.3).
-    final hasThirdKeyColumn = tier.index >= AtmTier.lobbyPlus.index;
-    final hasContactless = tier.index >= AtmTier.lobbyPlus.index;
-    final hasCamera = tier.index >= AtmTier.ttwUnit.index;
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // Schermpje, met camera-dot op de TTW-units.
-        Expanded(
-          flex: 3,
-          child: Container(
-            padding: const EdgeInsets.all(8),
+    final isNight = state.hourOfDay < 7 || state.hourOfDay >= 21;
+    return SizedBox(
+      height: 96,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final width = constraints.maxWidth;
+          const machineWidth = 118.0;
+          final machineLeft = width - machineWidth;
+          return ClipRRect(
+            borderRadius: BorderRadius.circular(10),
+            child: Stack(
+              children: [
+                // Achtergrond: hal (lobby) of straatgevel (TTW), met een
+                // licht isometrisch vloervlak.
+                Positioned.fill(
+                  child: Container(
+                    color: atm.housing == AtmHousing.ttw
+                        ? (isNight
+                              ? const Color(0xFF3A4148)
+                              : const Color(0xFF6E7880))
+                        : (isNight
+                              ? const Color(0xFF7A7468)
+                              : const Color(0xFFEFE7D4)),
+                  ),
+                ),
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  height: 26,
+                  child: Transform(
+                    transform: Matrix4.identity()..setEntry(1, 0, -0.06),
+                    child: Container(
+                      color: atm.housing == AtmHousing.ttw
+                          ? const Color(0xFF4E565E)
+                          : const Color(0xFFDDD0B4),
+                    ),
+                  ),
+                ),
+                // De wachtende klanten schuiven naar hun plek in de rij.
+                for (var i = 0; i < atm.queueLength && i < 8; i++)
+                  _Customer(
+                    key: ValueKey('q$i'),
+                    left: machineLeft - 46.0 - i * 22.0,
+                    seed: (atm.id * 31 + i) % 6,
+                    walking: false,
+                  ),
+                // De klant aan de automaat.
+                if (atm.transaction != null)
+                  _Customer(
+                    key: const ValueKey('active'),
+                    left: machineLeft - 22,
+                    seed: atm.id % 6,
+                    walking: false,
+                    leaning: phase == TransactionPhase.cardPresented,
+                  ),
+                // De machine zelf.
+                Positioned(
+                  right: 0,
+                  top: 4,
+                  bottom: 4,
+                  width: machineWidth,
+                  child: _Machine(atm: atm, status: _status, alert: alert),
+                ),
+                // Glazen overkapping op level 5 (de Quantum Node).
+                if (atm.level >= 5)
+                  Positioned(
+                    right: 0,
+                    top: 0,
+                    width: machineWidth + 46,
+                    height: 12,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.28),
+                        borderRadius: const BorderRadius.only(
+                          bottomLeft: Radius.circular(10),
+                        ),
+                        border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.5),
+                        ),
+                      ),
+                    ),
+                  ),
+                // Wachtrijteller.
+                Positioned(
+                  left: 6,
+                  top: 6,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 7,
+                      vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.35),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(
+                      'rij ${atm.queueLength} van ${atm.queueCapacity}',
+                      style: const TextStyle(
+                        fontFamily: kDigitFont,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// Een klant: hoofd plus jas, met AnimatedPositioned zodat hij vloeiend
+/// naar zijn plek in de rij schuift wanneer de engine-stand verandert.
+class _Customer extends StatelessWidget {
+  const _Customer({
+    super.key,
+    required this.left,
+    required this.seed,
+    required this.walking,
+    this.leaning = false,
+  });
+
+  final double left;
+  final int seed;
+  final bool walking;
+  final bool leaning;
+
+  static const _coats = [
+    Color(0xFF5C7CFA),
+    Color(0xFF37B24D),
+    Color(0xFFE8590C),
+    Color(0xFF845EF7),
+    Color(0xFF1098AD),
+    Color(0xFFD6336C),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final coat = _coats[seed];
+    return AnimatedPositioned(
+      duration: const Duration(milliseconds: 700),
+      curve: Curves.easeOutCubic,
+      left: left,
+      bottom: 10,
+      child: AnimatedRotation(
+        duration: const Duration(milliseconds: 300),
+        turns: leaning ? 0.015 : 0,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 9,
+              height: 9,
+              decoration: const BoxDecoration(
+                color: Color(0xFFE9C9A8),
+                shape: BoxShape.circle,
+              ),
+            ),
+            const SizedBox(height: 1),
+            Container(
+              width: 12,
+              height: 20,
+              decoration: BoxDecoration(
+                color: coat,
+                borderRadius: BorderRadius.circular(5),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// De automaat in de scene: scherm met status, knipperende kaartlezer en
+/// de shutter met de fase-choreografie.
+class _Machine extends StatelessWidget {
+  const _Machine({
+    required this.atm,
+    required this.status,
+    required this.alert,
+  });
+
+  final Atm atm;
+  final String status;
+  final bool alert;
+
+  @override
+  Widget build(BuildContext context) {
+    final phase = atm.transaction?.phase;
+    final isDeposit = atm.transaction?.isDeposit ?? false;
+    final shutterOpen = phase == TransactionPhase.shutterAction;
+    final cardActive = phase == TransactionPhase.cardPresented;
+
+    final bodyColor = switch (atm.level) {
+      1 => const Color(0xFFD9CBA8),
+      2 => AppColors.cabinetBasic,
+      3 => AppColors.gradientBottom,
+      4 => AppColors.steel,
+      _ => const Color(0xFF23201A),
+    };
+
+    return Container(
+      decoration: BoxDecoration(
+        color: bodyColor,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: atm.level >= 4 ? AppColors.steel : AppColors.cabinetShade,
+          width: atm.level >= 4 ? 3 : 1,
+        ),
+        boxShadow: atm.level >= 5
+            ? const [BoxShadow(color: Color(0x66FFD75E), blurRadius: 10)]
+            : null,
+      ),
+      padding: const EdgeInsets.all(6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Neonstrip vanaf level 4.
+          if (atm.level >= 4)
+            Container(
+              height: 3,
+              margin: const EdgeInsets.only(bottom: 3),
+              decoration: BoxDecoration(
+                color: AppColors.ledGlow,
+                borderRadius: BorderRadius.circular(2),
+                boxShadow: const [
+                  BoxShadow(color: Color(0xAAFFE27A), blurRadius: 6),
+                ],
+              ),
+            ),
+          // Scherm: status in LED-cijfers, curved vanaf level 5.
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 3),
             decoration: BoxDecoration(
               color: AppColors.ledPanel,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: AppColors.cabinetShade),
+              borderRadius: BorderRadius.circular(atm.level >= 5 ? 9 : 4),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        _status,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: ledDigits(
-                          11,
-                          color: alert ? AppColors.warning : AppColors.ledGlow,
-                        ),
-                      ),
-                    ),
-                    if (hasCamera)
-                      Container(
-                        width: 7,
-                        height: 7,
-                        margin: const EdgeInsets.only(left: 4),
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: AppColors.ledDim,
-                          border: Border.all(
-                            color: AppColors.steel,
-                            width: 1.5,
-                          ),
-                        ),
-                      ),
-                  ],
+                Text(
+                  status,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: ledDigits(
+                    8.5,
+                    color: alert ? AppColors.warning : AppColors.ledGlow,
+                  ),
                 ),
-                const SizedBox(height: 3),
                 Text(
                   formatEuro(atm.lifetimeEarned),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: ledDigits(15),
+                  style: ledDigits(11),
                 ),
               ],
             ),
           ),
-        ),
-        const SizedBox(width: 8),
-        // Pinpad: zes toetsen, vanaf lobby plus negen.
-        Column(
-          children: [
-            for (var row = 0; row < 3; row++)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 3),
-                child: Row(
-                  children: [
-                    for (var col = 0; col < (hasThirdKeyColumn ? 3 : 2); col++)
-                      Container(
-                        width: hasThirdKeyColumn ? 11 : 15,
-                        height: 11,
-                        margin: const EdgeInsets.only(right: 3),
-                        decoration: BoxDecoration(
-                          color: AppColors.ledPanel,
-                          borderRadius: BorderRadius.circular(3),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-          ],
-        ),
-        const SizedBox(width: 8),
-        // Pasjessleuf (met contactless vanaf lobby plus), geldsleuf en op
-        // de recycler een groene stortsleuf.
-        Expanded(
-          flex: 2,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+          const SizedBox(height: 4),
+          // Kaartlezer: knippert blauw/groen tijdens het aanbieden.
+          Row(
             children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Container(
-                      height: 8,
-                      decoration: BoxDecoration(
-                        color: AppColors.ledPanel,
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                    ),
-                  ),
-                  if (hasContactless) ...[
-                    const SizedBox(width: 4),
-                    const Icon(
-                      Icons.contactless_outlined,
-                      size: 12,
-                      color: AppColors.ledPanel,
-                    ),
-                  ],
-                ],
-              ),
-              const SizedBox(height: 8),
-              Container(
-                height: 16,
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 350),
+                width: 26,
+                height: 6,
                 decoration: BoxDecoration(
-                  color: AppColors.gradientBottom,
-                  borderRadius: BorderRadius.circular(4),
-                  border: Border.all(color: AppColors.ledPanel, width: 2.5),
+                  color: cardActive
+                      ? const Color(0xFF37B24D)
+                      : AppColors.ledPanel,
+                  borderRadius: BorderRadius.circular(3),
+                  boxShadow: cardActive
+                      ? const [
+                          BoxShadow(color: Color(0x8837B24D), blurRadius: 6),
+                        ]
+                      : null,
                 ),
               ),
-              if (tier.isRecycler) ...[
-                const SizedBox(height: 6),
-                Container(
-                  height: 14,
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(4),
-                    border: Border.all(color: AppColors.incomePill, width: 2),
-                  ),
-                  child: const Center(
-                    child: Text(
-                      'STORT',
-                      style: TextStyle(
-                        fontFamily: kDigitFont,
-                        fontSize: 7,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 1.5,
-                        color: AppColors.incomePill,
-                      ),
+              const SizedBox(width: 4),
+              if (phase == TransactionPhase.processing)
+                SizedBox(
+                  width: 8,
+                  height: 8,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 1.6,
+                    valueColor: AlwaysStoppedAnimation<Color>(
+                      AppColors.ledGlow.withValues(alpha: 0.9),
                     ),
                   ),
                 ),
-              ],
             ],
           ),
-        ),
-      ],
+          const Spacer(),
+          // De shutter. Dispenser: smalle, discrete sleuf. Recycler: een
+          // twee keer zo grote gemotoriseerde klep die wijd openschuift,
+          // met een groene LED-gloed bij een storting.
+          _Shutter(
+            isRecycler: atm.isRecycler,
+            open: shutterOpen,
+            depositGlow: shutterOpen && isDeposit,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _Shutter extends StatelessWidget {
+  const _Shutter({
+    required this.isRecycler,
+    required this.open,
+    required this.depositGlow,
+  });
+
+  final bool isRecycler;
+  final bool open;
+  final bool depositGlow;
+
+  @override
+  Widget build(BuildContext context) {
+    final height = isRecycler ? 18.0 : 9.0;
+    return Container(
+      height: height,
+      decoration: BoxDecoration(
+        color: AppColors.ledPanel,
+        borderRadius: BorderRadius.circular(4),
+        boxShadow: depositGlow
+            ? const [BoxShadow(color: Color(0xAA37B24D), blurRadius: 8)]
+            : null,
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Stack(
+        children: [
+          // Binnenkant: geld (opname) of groene gloed (storting).
+          Positioned.fill(
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 250),
+              color: depositGlow
+                  ? const Color(0xFF37B24D)
+                  : open
+                  ? AppColors.gradientBottom
+                  : AppColors.ledPanel,
+            ),
+          ),
+          // De klep zelf schuift soepel omhoog open.
+          AnimatedAlign(
+            duration: const Duration(milliseconds: 450),
+            curve: Curves.easeInOutCubic,
+            alignment: Alignment.topCenter,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 450),
+              curve: Curves.easeInOutCubic,
+              height: open ? height * 0.22 : height,
+              decoration: BoxDecoration(
+                color: AppColors.steel,
+                border: Border(
+                  bottom: BorderSide(
+                    color: AppColors.ink.withValues(alpha: 0.5),
+                    width: 1.5,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
 
 /// Rij cassetteslots: per cassette een mini-balkje met de vulling; een
-/// cassette in storing kleurt rood met een moersleuteltje
-/// (multi-cassette, Ontwerper dd 2026-07-04).
+/// cassette in storing kleurt rood met een moersleuteltje.
 class _CassetteSlots extends StatelessWidget {
-  const _CassetteSlots({required this.atm});
+  const _CassetteSlots({required this.atm, required this.ink});
 
   final Atm atm;
+  final Color ink;
 
   @override
   Widget build(BuildContext context) {
@@ -538,7 +787,7 @@ class _CassetteSlots extends StatelessWidget {
             fontFamily: kDigitFont,
             fontSize: 10.5,
             fontWeight: FontWeight.w700,
-            color: AppColors.ink.withValues(alpha: 0.7),
+            color: ink.withValues(alpha: 0.7),
           ),
         ),
         const SizedBox(width: 6),
@@ -550,12 +799,12 @@ class _CassetteSlots extends StatelessWidget {
               decoration: BoxDecoration(
                 color: cassette.isBroken
                     ? AppColors.warning.withValues(alpha: 0.25)
-                    : AppColors.ink.withValues(alpha: 0.12),
+                    : ink.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(4),
                 border: Border.all(
                   color: cassette.isBroken
                       ? AppColors.warning
-                      : AppColors.ink.withValues(alpha: 0.25),
+                      : ink.withValues(alpha: 0.25),
                 ),
               ),
               child: cassette.isBroken
@@ -579,9 +828,7 @@ class _CassetteSlots extends StatelessWidget {
               margin: const EdgeInsets.only(right: 4),
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(4),
-                border: Border.all(
-                  color: AppColors.ink.withValues(alpha: 0.15),
-                ),
+                border: Border.all(color: ink.withValues(alpha: 0.15)),
               ),
             ),
           ),
@@ -597,11 +844,13 @@ class _CassetteBar extends StatelessWidget {
     required this.notes,
     required this.capacity,
     required this.minutesUntilEmpty,
+    required this.ink,
   });
 
   final int notes;
   final int capacity;
   final double minutesUntilEmpty;
+  final Color ink;
 
   @override
   Widget build(BuildContext context) {
@@ -609,7 +858,7 @@ class _CassetteBar extends StatelessWidget {
     final label = minutesUntilEmpty.isFinite
         ? 'leeg over ${minutesUntilEmpty.toStringAsFixed(1)} min'
         : 'stabiel';
-    // Weergave in echte biljetten (basis-cassette 2.000); de teller telt
+    // Weergave in echte biljetten (cassette 2.000); de teller telt
     // geanimeerd naar de nieuwe stand, zodat een bijvulling zichtbaar
     // naar vol loopt.
     final targetNotes = (notes * kNotesPerUnit).toDouble();
@@ -630,6 +879,7 @@ class _CassetteBar extends StatelessWidget {
             'van $displayCapacity biljetten',
         right: notes == 0 ? 'leeg' : label,
         rightColor: urgent ? AppColors.warning : null,
+        ink: ink,
       ),
     );
   }
@@ -638,9 +888,10 @@ class _CassetteBar extends StatelessWidget {
 /// Slijtagebalk (GDD 10): toont de slechtste werkende cassette; bij een
 /// cassette in storing telt het label mee hoeveel er nog werken.
 class _WearBar extends StatelessWidget {
-  const _WearBar({required this.atm});
+  const _WearBar({required this.atm, required this.ink});
 
   final Atm atm;
+  final Color ink;
 
   @override
   Widget build(BuildContext context) {
@@ -657,6 +908,7 @@ class _WearBar extends StatelessWidget {
           ? 'onderhoud beschikbaar'
           : '',
       rightColor: broken > 0 ? AppColors.warning : null,
+      ink: ink,
     );
   }
 }
@@ -667,6 +919,7 @@ class _LabeledBar extends StatelessWidget {
     required this.color,
     required this.left,
     required this.right,
+    required this.ink,
     this.rightColor,
   });
 
@@ -674,15 +927,16 @@ class _LabeledBar extends StatelessWidget {
   final Color color;
   final String left;
   final String right;
+  final Color ink;
   final Color? rightColor;
 
   @override
   Widget build(BuildContext context) {
-    const labelStyle = TextStyle(
+    final labelStyle = TextStyle(
       fontFamily: kDigitFont,
       fontSize: 10.5,
       fontWeight: FontWeight.w700,
-      color: AppColors.ink,
+      color: ink,
     );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -694,7 +948,7 @@ class _LabeledBar extends StatelessWidget {
             Text(
               right,
               style: labelStyle.copyWith(
-                color: rightColor ?? AppColors.ink.withValues(alpha: 0.7),
+                color: rightColor ?? ink.withValues(alpha: 0.7),
               ),
             ),
           ],
@@ -705,7 +959,7 @@ class _LabeledBar extends StatelessWidget {
           child: LinearProgressIndicator(
             value: fraction.clamp(0, 1),
             minHeight: 7,
-            backgroundColor: AppColors.ink.withValues(alpha: 0.15),
+            backgroundColor: ink.withValues(alpha: 0.15),
             valueColor: AlwaysStoppedAnimation<Color>(color),
           ),
         ),

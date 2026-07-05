@@ -201,32 +201,48 @@ class OfflineCalculator {
       updated = updated.copyWith(outageSecondsRemaining: 0);
     }
 
+    // Aanloop over het etmaal: het drukteprofiel, voor een lobby gedempt
+    // buiten de openingstijden van het pand.
     final profile = kBusyProfiles[atm.location]!;
-    final txPerSecond = min(
-      kTransactionChancePerSecond * profile.dayAverage,
+    var arrivalFactorSum = 0.0;
+    for (var hour = 0; hour < kHoursPerDay; hour++) {
+      arrivalFactorSum +=
+          profile.factorAt(hour) *
+          (atm.isLobbyClosedAt(hour) ? kLobbyClosedArrivalFactor : 1.0);
+    }
+    final arrivalsPerSecond = min(
+      kTransactionChancePerSecond * (arrivalFactorSum / kHoursPerDay),
       kTransactionChanceCap,
     );
 
+    // Doorvoer: begrensd door de aanloop en door de verwerkingstijd van
+    // het level (wachtrijmodel, Ontwerper dd 2026-07-04).
+    final txPerSecond = min(arrivalsPerSecond, 1 / atm.totalServiceTicks);
+
+    // Op een recycler is een deel van de transacties een storting die de
+    // cassettes juist bijvult.
+    final depositShare = atm.isRecycler ? kRecyclerDepositShare : 0.0;
+    final withdrawalsPerSecond = txPerSecond * (1 - depositShare);
+    final depositsPerSecond = txPerSecond * depositShare;
+
     // Verwachte cassette-drain per seconde, inclusief het 100 euro biljet.
-    var drainPerSecond = txPerSecond * kAvgNotesPerTransaction;
+    var drainPerSecond = withdrawalsPerSecond * kAvgNotesPerTransaction;
     if (s.hundredEuroNoteActive) {
       drainPerSecond *= kHundredEuroNoteDrainMultiplier;
     }
-
-    // Recyclers krijgen offline ook stortingen: verwachte aanvulling en
-    // extra slijtage (GDD 3.1 en 4).
-    var refillPerSecond = 0.0;
-    var depositWearPerSecond = 0.0;
-    var depositFeePerSecond = 0.0;
-    if (atm.tier.isRecycler) {
-      const avgDepositNotes = (kDepositNotesMin + kDepositNotesMax) / 2;
-      refillPerSecond = kDepositChancePerSecond * avgDepositNotes;
-      depositWearPerSecond = kDepositChancePerSecond * kRecyclerWearPerDeposit;
-      depositFeePerSecond = kDepositChancePerSecond * kDepositFeeEur;
-    }
+    const avgDepositNotes = (kDepositNotesMin + kDepositNotesMax) / 2;
+    final refillPerSecond = depositsPerSecond * avgDepositNotes;
+    final depositWearPerSecond = depositsPerSecond * kRecyclerWearPerDeposit;
+    final depositFeePerSecond =
+        depositsPerSecond *
+        kRecyclerDepositFee *
+        atm.levelIncomeMultiplier *
+        s.incomeMultiplier;
 
     final wearPerSecond =
-        kWearPerSecond * (1 - kIbnsWearReductionPerLevel * ibnsLevel) +
+        kWearPerSecond *
+            atm.wearFactor *
+            (1 - kIbnsWearReductionPerLevel * ibnsLevel) +
         depositWearPerSecond;
 
     // Voorraad- en slijtagebudget over de werkende cassettes: de engine
@@ -252,19 +268,21 @@ class OfflineCalculator {
       min(secondsUntilEmpty, secondsUntilWorn),
     );
 
-    // Verwacht inkomen per transactie: tierinkomen x gemiddelde spreiding x
-    // gewogen banktarief x multipliers, plus de DCC-verwachting (GDD 3.1).
+    // Verwacht inkomen per opname: basisinkomen x klanttevredenheid x
+    // gemiddelde spreiding x gewogen banktarief x multipliers, plus de
+    // DCC-verwachting (GDD 3.1).
     final dccChance = atm.isTouristLocation
         ? kDccChanceTourist
         : kDccChanceNormal;
-    final incomePerTx =
-        atm.incomePerTransaction *
+    final incomePerWithdrawal =
+        atm.baseIncome *
+            atm.levelIncomeMultiplier *
             kIncomeSpreadAvg *
             bankRate *
             s.incomeMultiplier +
         dccChance * kDccBonusEur;
     final rawIncome =
-        txPerSecond * earningSeconds * incomePerTx +
+        withdrawalsPerSecond * earningSeconds * incomePerWithdrawal +
         depositFeePerSecond * earningSeconds;
     final income = rawIncome * offlineFactor;
 

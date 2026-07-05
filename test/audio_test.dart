@@ -9,17 +9,28 @@ import 'helpers/states.dart';
 
 void main() {
   group('cassetteEmpty-feedback', () {
-    test('wordt gemeld als de laatste biljetten worden opgenomen', () {
+    /// Laat een volledige opname doorlopen (acht ticks op level 1).
+    List<GameFeedback> runWithdrawal(int startNotes) {
       final events = <GameFeedback>[];
       final engine = TickEngine(
-        // Transactiekans slaagt (0,0), spreiding laag, geen DCC.
-        random: FakeRandom(doubles: [0.0, 0.0, 0.999]),
+        random: FakeRandom(
+          doubles: [...arrivalMisses(8), 0.5, 0.0, 0.99, 0.99],
+          bools: [false],
+        ),
         onFeedback: events.add,
       );
-      final state = singleAtmState(notesInCassette: 1, hour: 12);
+      var s = withQueue(
+        singleAtmState(notesInCassette: startNotes, hour: 12),
+        1,
+      );
+      for (var i = 0; i < 8; i++) {
+        s = engine.tick(s);
+      }
+      return events;
+    }
 
-      engine.tick(state);
-
+    test('wordt gemeld als de laatste biljetten worden opgenomen', () {
+      final events = runWithdrawal(1);
       expect(
         events.where((e) => e.type == FeedbackType.cassetteEmpty).length,
         1,
@@ -27,15 +38,7 @@ void main() {
     });
 
     test('blijft stil zolang er biljetten overblijven', () {
-      final events = <GameFeedback>[];
-      final engine = TickEngine(
-        random: FakeRandom(doubles: [0.0, 0.0, 0.999]),
-        onFeedback: events.add,
-      );
-      final state = singleAtmState(notesInCassette: 500, hour: 12);
-
-      engine.tick(state);
-
+      final events = runWithdrawal(100);
       expect(
         events.where((e) => e.type == FeedbackType.cassetteEmpty),
         isEmpty,

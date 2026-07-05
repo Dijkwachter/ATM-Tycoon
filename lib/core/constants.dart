@@ -9,11 +9,14 @@
 
 import '../models/enums.dart';
 
-/// Kans per seconde dat een operationele automaat een transactie doet,
-/// voor vermenigvuldiging met de druktefactor. Bron: Parameters!B5.
+/// Kans per seconde dat er een klant bij een operationele automaat
+/// aankomt, voor vermenigvuldiging met de druktefactor. In het
+/// wachtrijmodel (Ontwerper dd 2026-07-04) is dit de aanloop; de
+/// verwerkingssnelheid van de automaat bepaalt hoe snel de rij slinkt.
+/// Bron: Parameters!B5.
 const double kTransactionChancePerSecond = 0.55;
 
-/// Bovengrens op de transactiekans na druktefactor. Bron: GDD 3.1 tabel
+/// Bovengrens op de aanloopkans na druktefactor. Bron: GDD 3.1 tabel
 /// Inkomsten ("max 0,95").
 const double kTransactionChanceCap = 0.95;
 
@@ -129,6 +132,88 @@ const double kCitVanPriceGrowth = 2.0;
 /// Duur van het vullen en repareren ter plaatse, in ticks.
 const int kServicingDurationTicks = 3;
 
+// ---------------------------------------------------------------------------
+// Modulaire automaten: behuizing x functionaliteit x level 1-5.
+// Bron: Ontwerper dd 2026-07-04 ("Modulaire ATM basis & het 5-level
+// upgradesysteem").
+// ---------------------------------------------------------------------------
+
+/// Meerprijs van een through-the-wall-behuizing bij aankoop.
+const double kTtwHousingPremium = 150;
+
+/// Meerprijs van een recycler-module bij aankoop.
+const double kRecyclerFunctionPremium = 250;
+
+/// Basisinkomen per opname in EUR per functionaliteit: de recycler heeft
+/// hogere basisinkomsten (dikkere transacties, stortbonussen apart).
+const double kDispenserBaseIncome = 7.0;
+const double kRecyclerBaseIncome = 9.0;
+
+/// Upgradekosten om level 2 tot en met 5 te bereiken.
+const List<double> kLevelUpgradeCost = [350, 840, 2016, 4838];
+
+/// Verwerkingsfase-duur (ticks) per level; de totale transactieduur is
+/// kaart (1) + verwerking + shutter (1) + afronding (1). Hogere levels
+/// werken wachtrijen dus sneller weg.
+const List<int> kLevelProcessingTicks = [4, 3, 2, 2, 1];
+
+/// Maximale wachtrij per level voordat nieuwe klanten ongeduldig
+/// doorlopen ("Level 1: max 3 mensen, Level 5: max 15").
+const List<int> kLevelQueueCapacity = [3, 6, 9, 12, 15];
+
+/// Extra wachtrijplekken van een TTW-behuizing (straatkant, meer ruimte).
+const int kTtwQueueBonus = 3;
+
+/// Mechanische betrouwbaarheid: schaal op de basisslijtage per tick.
+const List<double> kLevelWearFactor = [1.0, 0.85, 0.7, 0.55, 0.4];
+
+/// Mechanische betrouwbaarheid: schaal op de klemloopkans per transactie.
+const List<double> kLevelJamFactor = [1.0, 0.8, 0.6, 0.45, 0.3];
+
+/// Kans op een interne mechanische storing (klemgelopen biljet) per
+/// afgeronde transactie, voor de levelschaal. De recycler heeft meer
+/// bewegende delen (invoer, teller) en dus meer risico.
+const double kDispenserJamChance = 0.01;
+const double kRecyclerJamChance = 0.03;
+
+/// Beveiliging: kans dat een plofkraak/vandalismepoging wordt afgeslagen
+/// puur op de kastbeveiliging (los van IBNS, die ook een verzekering
+/// uitkeert).
+const List<double> kLevelSecurityBlockChance = [0.0, 0.15, 0.3, 0.45, 0.6];
+
+/// Beveiliging: schaal op de voorrijkosten van een nood-trip; op level 5
+/// gehalveerd.
+const List<double> kLevelCalloutFactor = [1.0, 0.875, 0.75, 0.625, 0.5];
+
+/// Klanttevredenheid en UI-modernisering: permanente multiplier op de
+/// verdiende transactiekosten per level.
+const List<double> kLevelIncomeMultiplier = [1.0, 1.15, 1.3, 1.5, 1.75];
+
+/// Aandeel stortingen in de transacties van een recycler; stortingen
+/// vullen de cassettes live bij.
+const double kRecyclerDepositShare = 0.3;
+
+/// Fee in EUR per storting op een recycler (voor level- en
+/// netwerkmultipliers).
+const double kRecyclerDepositFee = 2.0;
+
+/// Openingstijden van panden met een lobby-automaat: daarbuiten is de
+/// aanloop minimaal en is de kast kwetsbaarder voor vandalisme.
+const int kLobbyOpeningHour = 7;
+const int kLobbyClosingHour = 22;
+
+/// Aanloopfactor voor een lobby-automaat buiten openingstijden.
+const double kLobbyClosedArrivalFactor = 0.15;
+
+/// Schaal op de beveiligings-blokkeerkans van een lobby-automaat buiten
+/// openingstijden (kwetsbaarder voor vandalisme).
+const double kLobbyClosedSecurityFactor = 0.5;
+
+/// Extra voorrijkosten bovenop [kBreakdownCalloutBase] voor zwaardere
+/// behuizingen en modules.
+const double kBreakdownCalloutTtwSurcharge = 20;
+const double kBreakdownCalloutRecyclerSurcharge = 20;
+
 /// DCC-bonus in EUR bovenop een toerist-transactie. Bron: Parameters!B20.
 const double kDccBonusEur = 4;
 
@@ -139,13 +224,6 @@ const double kDccChanceNormal = 0.05;
 /// Evenement, Horeca). Bron: Parameters!B22.
 const double kDccChanceTourist = 0.14;
 
-/// Fee in EUR per storting op een recycler. Bron: Parameters!B23.
-const double kDepositFeeEur = 0.5;
-
-/// Kans per seconde op een storting bij een operationele recycler.
-/// Bron: Parameters!B24.
-const double kDepositChancePerSecond = 0.12;
-
 /// Minimaal aantal biljetten dat een storting terug de cassette in brengt.
 /// Bron: Parameters!C24 en GDD 3.1 tabel Inkomsten ("2-6 biljetten").
 const int kDepositNotesMin = 2;
@@ -155,10 +233,6 @@ const int kDepositNotesMax = 6;
 
 /// Basis-voorrijkosten bij uitval van een automaat. Bron: Parameters!B25.
 const double kBreakdownCalloutBase = 40;
-
-/// Extra voorrijkosten per tier (tierindex 0 tot 3). Bron: GDD 3.2 tabel
-/// Kosten ("40 + 20 per tier").
-const double kBreakdownCalloutPerTier = 20;
 
 /// Basisprijs van een nieuwe automaat in EUR. Bron: GDD 3.3
 /// ("Nieuwe automaat: 400 euro basis").
@@ -382,17 +456,6 @@ const double kHeistInsuranceBase = 100;
 
 /// Extra verzekeringsuitkering per IBNS-level. Bron: GDD 3.1 tabel Inkomsten.
 const double kHeistInsurancePerIbnsLevel = 60;
-
-// ---------------------------------------------------------------------------
-// Terminal-tiers. Bron: Tiers-tab, rijen 2 tot 5.
-// ---------------------------------------------------------------------------
-
-/// Inkomen per transactie in EUR per tier. Bron: Tiers!C2 tot C5.
-const List<double> kTierIncomePerTransaction = [2, 3, 5, 8];
-
-/// Upgradekosten in EUR om deze tier te bereiken vanaf de vorige.
-/// Index 0 is de starttier en kost niets. Bron: Tiers!D2 tot D5.
-const List<double> kTierUpgradeCost = [0, 350, 840, 2016];
 
 // ---------------------------------------------------------------------------
 // Netwerk-upgrades. Bron: Upgrades-tab en GDD 7.1 tabel Upgrades.

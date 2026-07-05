@@ -15,30 +15,46 @@ import 'upgrade.dart';
 /// Handgeschreven Hive-adapters. Enums worden als index geserialiseerd;
 /// veldvolgorde is het schema, dus alleen achteraan uitbreiden.
 ///
-/// Migratie (Ontwerper dd 2026-07-04): het oude Atm-formaat had een enkele
-/// cassette in losse velden; het nieuwe formaat begint met de sentinel
-/// [AtmAdapter.formatV2] zodat beide gelezen kunnen worden. De GameState
-/// kreeg de CIT-vloot als staartveld: oude saves zonder dat veld krijgen
-/// de startvloot.
+/// Migratie (Ontwerper dd 2026-07-04): de Atm heeft drie generaties. V1
+/// (enkele cassette in losse velden) begint met de nooit-negatieve id;
+/// v2 (multi-cassette met tiers) met sentinel -2; v3 (modulair:
+/// behuizing, functionaliteit, level) met sentinel -3. Alle drie zijn
+/// leesbaar; er wordt alleen v3 geschreven. Wachtrij en lopende
+/// transactie zijn bewust geen onderdeel van het schema: klanten wachten
+/// niet op een app-herstart. De GameState kreeg de CIT-vloot als
+/// staartveld: oude saves zonder dat veld krijgen de startvloot.
 
 class AtmAdapter extends TypeAdapter<Atm> {
   @override
   final int typeId = 1;
 
-  /// Sentinel van het multi-cassette-formaat. Het oude formaat begint met
-  /// de (nooit negatieve) automaat-id, dus een negatieve eerste waarde
-  /// markeert ondubbelzinnig het nieuwe schema.
+  /// Sentinel van het multi-cassette-formaat met tiers (vervallen).
   static const int formatV2 = -2;
+
+  /// Sentinel van het modulaire formaat (behuizing/functionaliteit/level).
+  static const int formatV3 = -3;
+
+  /// Mapping van de vervallen tier-index naar de modulaire configuratie:
+  /// lobbyBasic, lobbyPlus, ttwUnit, ttwRecycler.
+  static const List<(AtmHousing, AtmFunction, int)> tierMigration = [
+    (AtmHousing.lobby, AtmFunction.dispenser, 1),
+    (AtmHousing.lobby, AtmFunction.dispenser, 2),
+    (AtmHousing.ttw, AtmFunction.dispenser, 3),
+    (AtmHousing.ttw, AtmFunction.recycler, 3),
+  ];
 
   @override
   void write(BinaryWriter writer, Atm obj) {
     writer
-      ..writeInt(formatV2)
+      ..writeInt(formatV3)
       ..writeInt(obj.id)
-      ..writeInt(obj.tier.index)
+      ..writeInt(obj.housing.index)
+      ..writeInt(obj.function.index)
+      ..writeInt(obj.level)
       ..writeInt(obj.location.index)
       ..writeDouble(obj.outageSecondsRemaining)
       ..writeDouble(obj.lifetimeEarned)
+      ..writeInt(obj.lostCustomers)
       ..writeInt(obj.cassettes.length);
     for (final c in obj.cassettes) {
       writer
@@ -51,11 +67,51 @@ class AtmAdapter extends TypeAdapter<Atm> {
   @override
   Atm read(BinaryReader reader) {
     final first = reader.readInt();
-    if (first != formatV2) {
-      return _readLegacy(reader, id: first);
+    if (first == formatV3) {
+      return _readV3(reader);
     }
+    if (first == formatV2) {
+      return _readV2(reader);
+    }
+    return _readV1(reader, id: first);
+  }
+
+  Atm _readV3(BinaryReader reader) {
     final id = reader.readInt();
-    final tier = AtmTier.values[reader.readInt()];
+    final housing = AtmHousing.values[reader.readInt()];
+    final function = AtmFunction.values[reader.readInt()];
+    final level = reader.readInt();
+    final location = LocationType.values[reader.readInt()];
+    final outageSecondsRemaining = reader.readDouble();
+    final lifetimeEarned = reader.readDouble();
+    final lostCustomers = reader.readInt();
+    final count = reader.readInt();
+    final cassettes = <Cassette>[
+      for (var i = 0; i < count; i++)
+        Cassette(
+          notes: reader.readInt(),
+          condition: reader.readDouble(),
+          repairSecondsRemaining: reader.readDouble(),
+        ),
+    ];
+    return Atm(
+      id: id,
+      housing: housing,
+      function: function,
+      level: level,
+      location: location,
+      cassettes: cassettes,
+      outageSecondsRemaining: outageSecondsRemaining,
+      lifetimeEarned: lifetimeEarned,
+      lostCustomers: lostCustomers,
+    );
+  }
+
+  /// V2 (multi-cassette met tiers): de tier wordt naar de modulaire
+  /// configuratie gemapt via [tierMigration].
+  Atm _readV2(BinaryReader reader) {
+    final id = reader.readInt();
+    final tierIndex = reader.readInt();
     final location = LocationType.values[reader.readInt()];
     final outageSecondsRemaining = reader.readDouble();
     final lifetimeEarned = reader.readDouble();
@@ -68,9 +124,12 @@ class AtmAdapter extends TypeAdapter<Atm> {
           repairSecondsRemaining: reader.readDouble(),
         ),
     ];
+    final (housing, function, level) = tierMigration[tierIndex];
     return Atm(
       id: id,
-      tier: tier,
+      housing: housing,
+      function: function,
+      level: level,
       location: location,
       cassettes: cassettes,
       outageSecondsRemaining: outageSecondsRemaining,
@@ -78,11 +137,12 @@ class AtmAdapter extends TypeAdapter<Atm> {
     );
   }
 
-  /// Oude formaat (enkele cassette): de inhoud wordt over cassettes van de
-  /// vaste maat verdeeld zodat de speler geen biljetten verliest; staat en
-  /// eventuele storing gelden voor alle slots.
-  Atm _readLegacy(BinaryReader reader, {required int id}) {
-    final tier = AtmTier.values[reader.readInt()];
+  /// V1 (enkele cassette): de inhoud wordt over cassettes van de vaste
+  /// maat verdeeld zodat de speler geen biljetten verliest; staat en
+  /// eventuele storing gelden voor alle slots. De tier wordt daarna als
+  /// bij v2 gemapt.
+  Atm _readV1(BinaryReader reader, {required int id}) {
+    final tierIndex = reader.readInt();
     final location = LocationType.values[reader.readInt()];
     final notes = reader.readInt();
     final condition = reader.readDouble();
@@ -107,9 +167,12 @@ class AtmAdapter extends TypeAdapter<Atm> {
           repairSecondsRemaining: repairSecondsRemaining,
         ),
     ];
+    final (housing, function, level) = tierMigration[tierIndex];
     return Atm(
       id: id,
-      tier: tier,
+      housing: housing,
+      function: function,
+      level: level,
       location: location,
       cassettes: cassettes,
       outageSecondsRemaining: outageSecondsRemaining,

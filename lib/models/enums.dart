@@ -1,19 +1,22 @@
 // Enums van het domeinmodel. Balanswaarden staan in lib/core/constants.dart.
 
-/// Terminal-tiers, oplopend. Bron: GDD 3.3 en Tiers-tab.
-enum AtmTier {
-  lobbyBasic,
-  lobbyPlus,
-  ttwUnit,
-  ttwRecycler;
+/// Behuizing (vormfactor) van een automaat (Ontwerper dd 2026-07-04,
+/// modulair ATM-systeem). Lobby staat vrijstaand binnen in een pand:
+/// kortere wachtrij en buiten openingstijden nauwelijks aanloop maar wel
+/// kwetsbaarder voor vandalisme. Through-the-wall zit in de buitenmuur:
+/// grotere wachtrij-capaciteit en 24/7 activiteit.
+enum AtmHousing { lobby, ttw }
 
-  /// Alleen de TTW recycler accepteert stortingen. Bron: GDD 3.3 tabel
-  /// Terminal-tiers.
-  bool get isRecycler => this == AtmTier.ttwRecycler;
+/// Functionaliteit van een automaat. De dispenser doet alleen opnames;
+/// de recycler accepteert ook stortingen (klanten vullen de cassettes
+/// live bij) maar heeft meer bewegende delen en dus een hogere kans op
+/// mechanische storingen zoals klemgelopen geld.
+enum AtmFunction { dispenser, recycler }
 
-  AtmTier? get next =>
-      index + 1 < AtmTier.values.length ? AtmTier.values[index + 1] : null;
-}
+/// Micro-fases van een lopende transactie, gevoed aan de UI voor de
+/// geanimeerde choreografie (kaart aanbieden, verwerken, shutter open,
+/// afronden). Elke fase duurt een of meer hele ticks.
+enum TransactionPhase { cardPresented, processing, shutterAction, finishing }
 
 /// Locatiesoorten met elk een eigen drukteprofiel. Bron: GDD 5 tabel
 /// Drukteprofielen.

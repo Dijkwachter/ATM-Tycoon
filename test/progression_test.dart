@@ -1,6 +1,7 @@
 import 'package:atm_empire/core/constants.dart';
 import 'package:atm_empire/engine/tick_engine.dart';
 import 'package:atm_empire/models/atm.dart';
+import 'package:atm_empire/models/cassette.dart';
 import 'package:atm_empire/models/enums.dart';
 import 'package:atm_empire/models/game_state.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -8,31 +9,43 @@ import 'package:flutter_test/flutter_test.dart';
 import 'helpers/fake_random.dart';
 import 'helpers/states.dart';
 
+/// Laat een gescripte opname volledig doorlopen: klant in de rij, acht
+/// ticks fases, resolutie met spreiding midden (1,1), Bank Oranje (0,9),
+/// geen DCC en geen jam. Inkomen: 7 x 1,1 x 0,9 = 6,93 op level 1.
+GameState runWithdrawal(GameState s) {
+  final total = s.atms.first.totalServiceTicks;
+  final engine = TickEngine(
+    random: FakeRandom(
+      doubles: [...arrivalMisses(total + 1), 0.5, 0.0, 0.99, 0.99],
+      bools: [false],
+    ),
+  );
+  s = withQueue(s, 1);
+  for (var i = 0; i <= total; i++) {
+    s = engine.tick(s);
+  }
+  return s;
+}
+
 void main() {
   group('Mijlpalen (GDD 9.2)', () {
     test('het passeren van 750 totaal keert 150 uit', () {
-      // Transactie van 1,98 duwt het totaal over de eerste drempel.
-      final engine = TickEngine(
-        random: FakeRandom(doubles: [0.5, 0.5, 0.0, 0.99], bools: [false]),
-      );
-      final s = engine.tick(singleAtmState(balance: 0, totalEarned: 749));
+      // Een opname van 6,93 duwt het totaal over de eerste drempel.
+      final s = runWithdrawal(singleAtmState(balance: 0, totalEarned: 749));
       expect(s.milestonesClaimed, 1);
-      expect(s.totalEarned, closeTo(749 + 1.98 + 150, 1e-9));
-      const interest = 99 * kAvgNoteValueEur * kFloatInterestPerSecond;
-      expect(s.balance, closeTo(1.98 + 150 - interest, 1e-9));
+      expect(s.totalEarned, closeTo(749 + 6.93 + 150, 1e-9));
+      // Saldo: inkomen plus bonus minus de float-rente van acht ticks.
+      expect(s.balance, closeTo(6.93 + 150, 0.5));
     });
 
     test('mijlpaalbonussen kunnen doorcascaderen', () {
-      // Op 1.999 duwt een transactie het totaal over 2.000; de bonus van
+      // Op 1.996 duwt een opname het totaal over 2.000; de bonus van
       // 300 blijft onder 4.000, dus precies een extra mijlpaal.
-      final engine = TickEngine(
-        random: FakeRandom(doubles: [0.5, 0.5, 0.0, 0.99], bools: [false]),
-      );
-      final before = singleAtmState(balance: 0, totalEarned: 1999);
+      final before = singleAtmState(balance: 0, totalEarned: 1996);
       expect(before.milestonesClaimed, 1);
-      final s = engine.tick(before);
+      final s = runWithdrawal(before);
       expect(s.milestonesClaimed, 2);
-      expect(s.totalEarned, closeTo(1999 + 1.98 + 300, 1e-9));
+      expect(s.totalEarned, closeTo(1996 + 6.93 + 300, 1e-9));
     });
 
     test('levels volgen de totaal-verdiend-drempels', () {
@@ -126,7 +139,7 @@ void main() {
     test('de eerste twee automaten kosten 400, daarna groeit de prijs', () {
       final engine = TickEngine(random: FakeRandom());
       var s = GameState.initial(nextEventInSeconds: 1000000);
-      // Startsaldo 1.000: twee automaten van 400 passen erin.
+      // Startsaldo 1.000: twee basisautomaten van 400 passen erin.
       expect(s.balance, 1000);
       expect(s.atms, isEmpty);
       expect(s.nextAtmPrice, 400);
@@ -139,7 +152,9 @@ void main() {
       expect(s.balance, 200);
       expect(s.nextAtmPrice, closeTo(640, 1e-9));
       final bought = s.atms.last;
-      expect(bought.tier, AtmTier.lobbyBasic);
+      expect(bought.housing, AtmHousing.lobby);
+      expect(bought.function, AtmFunction.dispenser);
+      expect(bought.level, 1);
       expect(bought.cassettes.length, 1);
       expect(bought.notesInCassette, kCassetteCapacityUnits);
       expect(bought.condition, 1.0);
@@ -158,17 +173,6 @@ void main() {
       final refused = engine.buyAtm(s, LocationType.zorg);
       expect(refused.atms.length, 3);
       expect(refused.balance, s.balance);
-    });
-
-    test('tier-upgrades volgen de kostentabel en behouden de cassettes', () {
-      final engine = TickEngine(random: FakeRandom());
-      var s = singleAtmState(notesInCassette: 42, balance: 400);
-      s = engine.upgradeAtmTier(s, 0);
-      expect(s.atms.first.tier, AtmTier.lobbyPlus);
-      expect(s.balance, 50);
-      expect(s.atms.first.notesInCassette, 42);
-      // Volgende stap kost 840: onvoldoende saldo, geen wijziging.
-      expect(engine.upgradeAtmTier(s, 0).atms.first.tier, AtmTier.lobbyPlus);
     });
 
     test('netwerk-upgrades verdubbelen in prijs en hebben een maximum', () {
@@ -203,16 +207,16 @@ void main() {
       expect(s.upgrade(UpgradeId.cassettes).isMaxed, isTrue);
     });
 
-    test('capaciteit groeit per gekochte cassette, niet per tier', () {
+    test('capaciteit groeit per gekochte cassette, niet per level', () {
       final engine = TickEngine(random: FakeRandom());
       var s = singleAtmState(balance: 2 * kExtraCassettePrice);
       expect(s.atms.first.capacity, kCassetteCapacityUnits);
       s = engine.buyCassette(s, 0);
       s = engine.buyCassette(s, 0);
       expect(s.atms.first.capacity, 3 * kCassetteCapacityUnits);
-      // De tier verandert de capaciteit niet.
-      final upgraded = singleAtmState(tier: AtmTier.ttwRecycler);
-      expect(upgraded.atms.first.capacity, kCassetteCapacityUnits);
+      // Het upgradelevel verandert de capaciteit niet.
+      final leveled = singleAtmState(level: 5);
+      expect(leveled.atms.first.capacity, kCassetteCapacityUnits);
     });
 
     test('personeel is eenmalig en kost de tabelprijs', () {
@@ -268,22 +272,37 @@ void main() {
 
     test('het 100 euro biljet laat cassettes 40% sneller leeglopen', () {
       // Na prestige: extra-biljet-roll 0,5 onder de kans 0,6, dus drie
-      // biljetten voor een transactie, en inkomen x2.
+      // biljetten voor een opname, en inkomen x2.
       final engine = TickEngine(
-        random: FakeRandom(doubles: [0.5, 0.5, 0.5, 0.0, 0.99], bools: [true]),
+        random: FakeRandom(
+          doubles: [...arrivalMisses(8), 0.5, 0.5, 0.0, 0.99, 0.99],
+          bools: [true],
+        ),
       );
-      // Prestige start tegenwoordig zonder automaten: zet er een neer.
+      // Prestige start zonder automaten: zet er zelf een neer.
       var s = TickEngine(
         random: FakeRandom(),
       ).prestige(singleAtmState(totalEarned: 25000));
       s = s.copyWith(
-        atms: [Atm.fresh(id: 0, location: LocationType.station)],
+        atms: [
+          const Atm(
+            id: 0,
+            housing: AtmHousing.lobby,
+            function: AtmFunction.dispenser,
+            level: 1,
+            location: LocationType.station,
+            queueLength: 1,
+            cassettes: [Cassette.full()],
+          ),
+        ],
         tick: tickForHour(12),
         nextEventInSeconds: 1000000,
       );
-      final after = engine.tick(s);
-      expect(after.atms.first.notesInCassette, kCassetteCapacityUnits - 3);
-      expect(after.totalEarned, closeTo(2.0 * 1.1 * 0.9 * 2.0, 1e-9));
+      for (var i = 0; i < 8; i++) {
+        s = engine.tick(s);
+      }
+      expect(s.atms.first.notesInCassette, kCassetteCapacityUnits - 3);
+      expect(s.totalEarned, closeTo(7.0 * 1.1 * 0.9 * 2.0, 1e-9));
     });
   });
 }

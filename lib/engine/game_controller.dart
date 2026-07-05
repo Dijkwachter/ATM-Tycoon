@@ -142,14 +142,19 @@ class GameController extends Notifier<GameState> {
   void preventiveMaintenance(int atmId) =>
       _apply((e, s) => e.preventiveMaintenance(s, atmId));
 
-  void buyAtm(LocationType location) => _apply((e, s) => e.buyAtm(s, location));
+  void buyAtm(
+    LocationType location, {
+    AtmHousing housing = AtmHousing.lobby,
+    AtmFunction function = AtmFunction.dispenser,
+  }) => _apply(
+    (e, s) => e.buyAtm(s, location, housing: housing, function: function),
+  );
 
   void buyCassette(int atmId) => _apply((e, s) => e.buyCassette(s, atmId));
 
   void buyCitVan() => _apply((e, s) => e.buyCitVan(s));
 
-  void upgradeAtmTier(int atmId) =>
-      _apply((e, s) => e.upgradeAtmTier(s, atmId));
+  void upgradeAtm(int atmId) => _apply((e, s) => e.upgradeAtm(s, atmId));
 
   void buyUpgrade(UpgradeId id) => _apply((e, s) => e.buyUpgrade(s, id));
 

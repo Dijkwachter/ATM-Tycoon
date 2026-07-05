@@ -12,10 +12,13 @@ int tickForHour(int hour) => hour * kGameHourRealSeconds;
 /// aanstaand event, zodat tests volledig gescript kunnen rekenen.
 GameState singleAtmState({
   LocationType location = LocationType.station,
-  AtmTier tier = AtmTier.lobbyBasic,
+  AtmHousing housing = AtmHousing.lobby,
+  AtmFunction function = AtmFunction.dispenser,
+  int level = 1,
   int? notesInCassette,
   double condition = 1.0,
   double repairSecondsRemaining = 0,
+  int queueLength = 0,
   double balance = 1000,
   double totalEarned = 0,
   int hour = 12,
@@ -23,8 +26,11 @@ GameState singleAtmState({
   final base = GameState.initial(nextEventInSeconds: 1000000);
   final atm = Atm(
     id: 0,
-    tier: tier,
+    housing: housing,
+    function: function,
+    level: level,
     location: location,
+    queueLength: queueLength,
     cassettes: [
       Cassette(
         notes: notesInCassette ?? kCassetteCapacityUnits,
@@ -67,6 +73,15 @@ GameState withFirstCassette(
     ),
   );
 }
+
+/// Zet [n] wachtende klanten voor de eerste automaat.
+GameState withQueue(GameState s, int n) =>
+    s.withAtm(s.atms.first.copyWith(queueLength: n));
+
+/// Vulwaarden voor de aanloop-roll die elke tick een double consumeert:
+/// 0,999 mist elke aanloopkans, zodat gescripte resolutie-rolls op hun
+/// plek in de wachtrij blijven staan.
+List<double> arrivalMisses(int ticks) => List.filled(ticks, 0.999);
 
 GameState withStaffHired(GameState s, StaffId id) => s.copyWith(
   staff: [for (final m in s.staff) m.id == id ? m.copyWith(hired: true) : m],

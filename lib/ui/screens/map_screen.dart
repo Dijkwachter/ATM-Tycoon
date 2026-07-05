@@ -68,7 +68,7 @@ class MapScreen extends ConsumerWidget {
             onService: () => controller.requestService(atm.id),
             onRepairTap: () => controller.tapRepair(atm.id),
             onMaintain: () => controller.preventiveMaintenance(atm.id),
-            onUpgrade: () => controller.upgradeAtmTier(atm.id),
+            onUpgrade: () => controller.upgradeAtm(atm.id),
             onOpenDetails: () => _showDetails(context, ref, atm.id),
           ),
         ],
@@ -104,8 +104,8 @@ class MapScreen extends ConsumerWidget {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
       ),
-      builder: (_) => Consumer(
-        builder: (context, ref, _) {
+      builder: (sheetContext) => Consumer(
+        builder: (_, ref, child) {
           final state = ref.watch(gameControllerProvider);
           final approval = (state.spreadApproval * 100).round();
           return SafeArea(
@@ -140,8 +140,8 @@ class MapScreen extends ConsumerWidget {
                 LandMap(
                   state: state,
                   onPickLocation: (location) {
-                    ref.read(gameControllerProvider.notifier).buyAtm(location);
-                    Navigator.of(context).pop();
+                    Navigator.of(sheetContext).pop();
+                    _showConfigurator(context, ref, location);
                   },
                 ),
                 const SizedBox(height: 8),
@@ -151,6 +151,214 @@ class MapScreen extends ConsumerWidget {
           );
         },
       ),
+    );
+  }
+
+  /// Stap twee van de koopflow: de modulaire configurator (Ontwerper dd
+  /// 2026-07-04). De speler kiest behuizing en functionaliteit; de prijs
+  /// telt live op en "Plaats automaat" rondt af.
+  void _showConfigurator(
+    BuildContext context,
+    WidgetRef ref,
+    LocationType location,
+  ) {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppColors.background,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder: (sheetContext) =>
+          _ConfiguratorSheet(location: location, sheetContext: sheetContext),
+    );
+  }
+}
+
+/// De modulaire configurator: behuizing (lobby of TTW) en functionaliteit
+/// (dispenser of recycler) met hun meerprijs en gevolgen.
+class _ConfiguratorSheet extends ConsumerStatefulWidget {
+  const _ConfiguratorSheet({
+    required this.location,
+    required this.sheetContext,
+  });
+
+  final LocationType location;
+  final BuildContext sheetContext;
+
+  @override
+  ConsumerState<_ConfiguratorSheet> createState() => _ConfiguratorSheetState();
+}
+
+class _ConfiguratorSheetState extends ConsumerState<_ConfiguratorSheet> {
+  AtmHousing _housing = AtmHousing.lobby;
+  AtmFunction _function = AtmFunction.dispenser;
+
+  double _price(GameState state) =>
+      state.nextAtmPrice +
+      (_housing == AtmHousing.ttw ? kTtwHousingPremium : 0) +
+      (_function == AtmFunction.recycler ? kRecyclerFunctionPremium : 0);
+
+  @override
+  Widget build(BuildContext context) {
+    final state = ref.watch(gameControllerProvider);
+    final price = _price(state);
+    final affordable = state.balance >= price;
+    return SafeArea(
+      child: ListView(
+        shrinkWrap: true,
+        padding: const EdgeInsets.all(14),
+        children: [
+          Text(
+            'Configureer je automaat - '
+            '${MapScreen.locationNames[widget.location]}',
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontFamily: kTextFont,
+              fontWeight: FontWeight.w700,
+              fontSize: 16,
+            ),
+          ),
+          const SizedBox(height: 10),
+          _ChoiceRow(
+            title: 'Behuizing',
+            options: [
+              (
+                'Lobby',
+                'binnen in het pand - rustiger, \'s nachts kwetsbaarder',
+                _housing == AtmHousing.lobby,
+                () => setState(() => _housing = AtmHousing.lobby),
+              ),
+              (
+                'Through-the-wall (+${formatEuroCompact(kTtwHousingPremium)})',
+                'in de buitenmuur - 24/7 aanloop, langere rij',
+                _housing == AtmHousing.ttw,
+                () => setState(() => _housing = AtmHousing.ttw),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          _ChoiceRow(
+            title: 'Functionaliteit',
+            options: [
+              (
+                'Dispenser',
+                'alleen opnames - eenvoudig en betrouwbaar',
+                _function == AtmFunction.dispenser,
+                () => setState(() => _function = AtmFunction.dispenser),
+              ),
+              (
+                'Recycler (+${formatEuroCompact(kRecyclerFunctionPremium)})',
+                'ook stortingen: hogere inkomsten, klanten vullen de '
+                    'cassettes bij, maar meer kans op klemgelopen geld',
+                _function == AtmFunction.recycler,
+                () => setState(() => _function = AtmFunction.recycler),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          TactileButton(
+            label: 'Plaats automaat',
+            sublabel: formatEuroCompact(price),
+            color: AppColors.gradientBottom,
+            textColor: AppColors.ink,
+            onPressed: affordable
+                ? () {
+                    ref
+                        .read(gameControllerProvider.notifier)
+                        .buyAtm(
+                          widget.location,
+                          housing: _housing,
+                          function: _function,
+                        );
+                    Navigator.of(widget.sheetContext).pop();
+                  }
+                : null,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ChoiceRow extends StatelessWidget {
+  const _ChoiceRow({required this.title, required this.options});
+
+  final String title;
+
+  /// (label, beschrijving, geselecteerd, onTap) per optie.
+  final List<(String, String, bool, VoidCallback)> options;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: const TextStyle(
+            fontFamily: kTextFont,
+            fontWeight: FontWeight.w700,
+            fontSize: 13,
+          ),
+        ),
+        const SizedBox(height: 4),
+        for (final (label, description, selected, onTap) in options)
+          GestureDetector(
+            onTap: onTap,
+            child: Container(
+              margin: const EdgeInsets.only(bottom: 4),
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: selected
+                    ? AppColors.gradientBottom.withValues(alpha: 0.25)
+                    : AppColors.card,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: selected
+                      ? AppColors.gradientBottom
+                      : AppColors.cabinetShade.withValues(alpha: 0.4),
+                  width: selected ? 2 : 1,
+                ),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    selected
+                        ? Icons.radio_button_checked
+                        : Icons.radio_button_off,
+                    size: 16,
+                    color: AppColors.ink,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          label,
+                          style: const TextStyle(
+                            fontFamily: kTextFont,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 13,
+                          ),
+                        ),
+                        Text(
+                          description,
+                          style: TextStyle(
+                            fontFamily: kTextFont,
+                            fontSize: 11.5,
+                            color: AppColors.ink.withValues(alpha: 0.7),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+      ],
     );
   }
 }
@@ -276,8 +484,24 @@ class _AtmDetailSheet extends ConsumerWidget {
               ),
               const SizedBox(height: 12),
               _detailRow(
-                'Inkomen per transactie',
-                'EUR ${formatEuro(atm.incomePerTransaction)}',
+                'Configuratie',
+                '${atm.housing == AtmHousing.ttw ? 'TTW' : 'Lobby'} '
+                    '${atm.isRecycler ? 'recycler' : 'dispenser'} - '
+                    'level ${atm.level}',
+              ),
+              _detailRow(
+                'Inkomen per opname',
+                'EUR '
+                    '${formatEuro(atm.baseIncome * atm.levelIncomeMultiplier)}',
+              ),
+              _detailRow(
+                'Transactieduur',
+                '${atm.totalServiceTicks}s per klant',
+              ),
+              _detailRow(
+                'Wachtrij',
+                '${atm.queueLength} van ${atm.queueCapacity} - '
+                    '${atm.lostCustomers} weggelopen',
               ),
               _detailRow(
                 'Cassette',
@@ -299,7 +523,7 @@ class _AtmDetailSheet extends ConsumerWidget {
                 'Etmaalgemiddelde',
                 'x${profile.dayAverage.toStringAsFixed(2)}',
               ),
-              if (atm.tier.isRecycler)
+              if (atm.isRecycler)
                 _detailRow('Recycler', 'accepteert stortingen'),
               const SizedBox(height: 10),
               for (var i = 0; i < atm.cassettes.length; i++)
