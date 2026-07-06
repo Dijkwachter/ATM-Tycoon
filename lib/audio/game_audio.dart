@@ -21,6 +21,13 @@ import 'package:just_audio/just_audio.dart';
 /// Alle audiocalls zijn defensief: op platforms zonder audio-plugin
 /// (flutter-tester, CI) wordt audio stil overgeslagen zodat de rest van
 /// de app gewoon werkt.
+///
+/// Let op bij het vervangen van audiobestanden: just_audio kopieert
+/// assets naar een cachebestand op het toestel, gekeyed op de
+/// bestandsnaam, en hergebruikt een bestaand cachebestand ook na een
+/// app-update. Vervang een track daarom altijd onder een NIEUWE naam
+/// (versie-suffix, zoals _v2) - anders blijft op bestaande installaties
+/// de oude audio klinken.
 class GameAudio {
   AudioPlayer? _music;
   AudioPlayer? _percussion;
@@ -51,16 +58,16 @@ class GameAudio {
       final pads = AudioPlayer();
       final blip = AudioPlayer();
       final click = AudioPlayer();
-      await music.setAsset('assets/audio/loop_main.wav');
+      await music.setAsset('assets/audio/loop_main_v2.wav');
       await music.setLoopMode(LoopMode.one);
       await music.setVolume(_musicVolume);
-      await percussion.setAsset('assets/audio/loop_perc.wav');
+      await percussion.setAsset('assets/audio/loop_perc_v2.wav');
       await percussion.setLoopMode(LoopMode.one);
       await percussion.setVolume(0.0);
       await pads.setAsset('assets/audio/loop_synth_pads.wav');
       await pads.setLoopMode(LoopMode.one);
       await pads.setVolume(0.0);
-      await blip.setAsset('assets/audio/sting_cassette_leeg.wav');
+      await blip.setAsset('assets/audio/sting_cassette_leeg_v2.wav');
       await blip.setVolume(0.8);
       await click.setAsset('assets/audio/sting_alert.wav');
       await click.setVolume(0.8);

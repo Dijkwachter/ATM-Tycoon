@@ -6,14 +6,19 @@ Drie loops met exact hetzelfde tempo (75 BPM), dezelfde toonsoort
 (A-mineur) en hetzelfde arrangement (4 maten, 12,8 s), zodat ze via
 volumefading naadloos over elkaar heen kunnen zonder te conflicteren:
 
-- loop_main.wav        rustige EP-akkoorden, zachte bas en vinylknisper
-- loop_perc.wav        shakers en zachte rim-klikjes
+- loop_main_v2.wav     rustige EP-akkoorden, zachte bas en vinylknisper
+- loop_perc_v2.wav     shakers en zachte rim-klikjes
 - loop_synth_pads.wav  warme, rustgevende pad-melodielijn
 
 Plus twee subtiele alerts die qua toonmateriaal in de loops passen:
 
-- sting_cassette_leeg.wav  zacht lo-fi bliepje (G4 -> C5)
-- sting_alert.wav          subtiel mechanisch dubbelklikje
+- sting_cassette_leeg_v2.wav  zacht lo-fi bliepje (G4 -> C5)
+- sting_alert.wav             subtiel mechanisch dubbelklikje
+
+Let op: just_audio cachet assets op het toestel op bestandsnaam en
+hergebruikt dat cachebestand ook na een app-update. Vervang een track
+dus altijd onder een nieuwe naam (versie-suffix ophogen) en pas de
+paden in lib/audio/game_audio.dart mee aan.
 
 Draaien vanaf de projectroot:  python3 tool/generate_audio.py
 """
@@ -168,7 +173,7 @@ for _ in range(140):
     tick = rng.standard_normal(n) * np.exp(-np.arange(n) / (0.0012 * RATE))
     add_wrapped(crackle, int(pos), rng.uniform(0.25, 1.0) * tick)
 main += 0.012 * crackle + 0.0035 * lowpass(rng.standard_normal(LOOP), 0.12)
-write_wav("assets/audio/loop_main.wav", normalize(main, 0.60))
+write_wav("assets/audio/loop_main_v2.wav", normalize(main, 0.60))
 
 # ---------------------------------------------------------------------
 # loop_perc.wav: shakers op achtsten, rim-klikjes op tel 2 en 4.
@@ -182,7 +187,7 @@ for eighth in range(BARS * 8):
 for bar in range(BARS):
     for beat in (1, 3):
         add_wrapped(perc, (bar * 4 + beat) * BEAT, rim_click(1.0))
-write_wav("assets/audio/loop_perc.wav", normalize(perc, 0.45))
+write_wav("assets/audio/loop_perc_v2.wav", normalize(perc, 0.45))
 
 # ---------------------------------------------------------------------
 # loop_synth_pads.wav: rustgevende melodielijn door de akkoordtonen,
@@ -208,7 +213,7 @@ for start, note in ((0.0, "G4"), (0.14, "C5")):
     ) * np.exp(-t / 0.09) * np.clip(t / 0.006, 0, 1)
     s = int(start * RATE)
     sting[s : s + len(blip)] += blip[: n - s]
-write_wav("assets/audio/sting_cassette_leeg.wav", normalize(sting, 0.30))
+write_wav("assets/audio/sting_cassette_leeg_v2.wav", normalize(sting, 0.30))
 
 # ---------------------------------------------------------------------
 # sting_alert.wav: subtiel mechanisch dubbelklikje.
