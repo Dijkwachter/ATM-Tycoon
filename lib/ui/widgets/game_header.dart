@@ -91,24 +91,39 @@ class GameHeader extends StatelessWidget {
                   const SizedBox(height: 10),
                   Center(child: LedDisplay(value: state.balance)),
                   const SizedBox(height: 10),
+                  // Drie chips die samen altijd op een rij passen: hele
+                  // euro's in het minuutbedrag en per chip een
+                  // scale-down zodat lange labels (Level Landelijk,
+                  // hoge inkomens) nooit tegen de schermrand drukken
+                  // (speler dd 2026-07-06).
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      _InfoChip(
-                        label: '${formatEuroCompact(incomePerMinute)} per min',
-                        icon: Icons.trending_up,
+                      _flexibleChip(
+                        _InfoChip(
+                          label:
+                              '€ ${formatEuro(incomePerMinute, decimals: 0)} '
+                              'per min',
+                          icon: Icons.trending_up,
+                        ),
                       ),
+                      const SizedBox(width: 6),
                       // Goedkeuringsscore van de Nationale Bank
                       // (spreidingswet): rood zodra zones tegen de grens
                       // aan zitten.
-                      _InfoChip(
-                        label: 'NB ${(state.spreadApproval * 100).round()}%',
-                        icon: Icons.account_balance_outlined,
-                        warning: state.spreadApproval < 0.5,
+                      _flexibleChip(
+                        _InfoChip(
+                          label: 'NB ${(state.spreadApproval * 100).round()}%',
+                          icon: Icons.account_balance_outlined,
+                          warning: state.spreadApproval < 0.5,
+                        ),
                       ),
-                      _InfoChip(
-                        label: 'Level ${_levelLabel(state)}',
-                        icon: Icons.flag_outlined,
+                      const SizedBox(width: 6),
+                      _flexibleChip(
+                        _InfoChip(
+                          label: 'Level ${_levelLabel(state)}',
+                          icon: Icons.flag_outlined,
+                        ),
                       ),
                     ],
                   ),
@@ -118,6 +133,14 @@ class GameHeader extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+
+  /// Chip die meebuigt met de beschikbare ruimte: krimpt in plaats van
+  /// overlopen wanneer de drie labels samen breder zijn dan de header.
+  Widget _flexibleChip(Widget chip) {
+    return Flexible(
+      child: FittedBox(fit: BoxFit.scaleDown, child: chip),
     );
   }
 
