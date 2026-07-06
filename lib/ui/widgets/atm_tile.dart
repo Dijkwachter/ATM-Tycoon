@@ -437,7 +437,7 @@ class _LiveScene extends StatelessWidget {
                   _Customer(
                     key: ValueKey('q$i'),
                     left: machineLeft - 46.0 - i * 22.0,
-                    seed: (atm.id * 31 + i) % 6,
+                    seed: atm.id * 131 + i * 17,
                     walking: false,
                   ),
                 // De klant aan de automaat.
@@ -445,7 +445,7 @@ class _LiveScene extends StatelessWidget {
                   _Customer(
                     key: const ValueKey('active'),
                     left: machineLeft - 22,
-                    seed: atm.id % 6,
+                    seed: atm.id * 131 + 997,
                     walking: false,
                     leaning: phase == TransactionPhase.cardPresented,
                   ),
@@ -509,8 +509,60 @@ class _LiveScene extends StatelessWidget {
   }
 }
 
-/// Een klant: hoofd plus jas, met AnimatedPositioned zodat hij vloeiend
-/// naar zijn plek in de rij schuift wanneer de engine-stand verandert.
+/// Deterministisch uiterlijk van een klant (Ontwerper dd 2026-07-06): de
+/// wereldbevolking loopt langs de automaat, dus huidtinten van licht tot
+/// donker, haarkleuren en haarlengtes (kort, lang, knot of kaal) wisselen
+/// per persoon. Alles wordt uit de seed afgeleid zodat de mix stabiel en
+/// testbaar is.
+class _CustomerLook {
+  _CustomerLook(int seed)
+    : skin = _skins[seed % _skins.length],
+      coat = _coats[(seed * 7 + 3) % _coats.length],
+      hairColor = _hairColors[(seed * 5 + 1) % _hairColors.length],
+      hairStyle = _HairStyle.values[(seed * 13 + 2) % _HairStyle.values.length];
+
+  final Color skin;
+  final Color coat;
+  final Color hairColor;
+  final _HairStyle hairStyle;
+
+  /// Huidtinten van licht tot donker.
+  static const _skins = [
+    Color(0xFFF5D5C0),
+    Color(0xFFE8BC9A),
+    Color(0xFFD1A374),
+    Color(0xFFB07B4F),
+    Color(0xFF8A5A35),
+    Color(0xFF5C3B22),
+  ];
+
+  static const _coats = [
+    Color(0xFF5C7CFA),
+    Color(0xFF37B24D),
+    Color(0xFFE8590C),
+    Color(0xFF845EF7),
+    Color(0xFF1098AD),
+    Color(0xFFD6336C),
+    Color(0xFF74665C),
+    Color(0xFFE6B117),
+  ];
+
+  static const _hairColors = [
+    Color(0xFF241A12),
+    Color(0xFF4E342E),
+    Color(0xFF8D6E63),
+    Color(0xFFD9B380),
+    Color(0xFFA9502C),
+    Color(0xFFB0B0B0),
+  ];
+}
+
+/// Haarlengte/-stijl: kort, lang tot op de schouders, een knot, of kaal.
+enum _HairStyle { short, long, bun, bald }
+
+/// Een klant: hoofd met haar plus jas, met AnimatedPositioned zodat hij
+/// of zij vloeiend naar de plek in de rij schuift wanneer de engine-stand
+/// verandert.
 class _Customer extends StatelessWidget {
   const _Customer({
     super.key,
@@ -525,18 +577,9 @@ class _Customer extends StatelessWidget {
   final bool walking;
   final bool leaning;
 
-  static const _coats = [
-    Color(0xFF5C7CFA),
-    Color(0xFF37B24D),
-    Color(0xFFE8590C),
-    Color(0xFF845EF7),
-    Color(0xFF1098AD),
-    Color(0xFFD6336C),
-  ];
-
   @override
   Widget build(BuildContext context) {
-    final coat = _coats[seed];
+    final look = _CustomerLook(seed);
     return AnimatedPositioned(
       duration: const Duration(milliseconds: 700),
       curve: Curves.easeOutCubic,
@@ -545,27 +588,81 @@ class _Customer extends StatelessWidget {
       child: AnimatedRotation(
         duration: const Duration(milliseconds: 300),
         turns: leaning ? 0.015 : 0,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 9,
-              height: 9,
-              decoration: const BoxDecoration(
-                color: Color(0xFFE9C9A8),
-                shape: BoxShape.circle,
+        child: SizedBox(
+          width: 14,
+          height: 34,
+          child: Stack(
+            alignment: Alignment.topCenter,
+            clipBehavior: Clip.none,
+            children: [
+              // Lang haar valt achter het hoofd tot op de schouders.
+              if (look.hairStyle == _HairStyle.long)
+                Positioned(
+                  top: 0,
+                  child: Container(
+                    width: 12,
+                    height: 15,
+                    decoration: BoxDecoration(
+                      color: look.hairColor,
+                      borderRadius: BorderRadius.circular(5),
+                    ),
+                  ),
+                ),
+              // Knotje boven het hoofd.
+              if (look.hairStyle == _HairStyle.bun)
+                Positioned(
+                  top: -3,
+                  child: Container(
+                    width: 5,
+                    height: 5,
+                    decoration: BoxDecoration(
+                      color: look.hairColor,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                ),
+              // Hoofd.
+              Positioned(
+                top: 2,
+                child: Container(
+                  width: 9,
+                  height: 9,
+                  decoration: BoxDecoration(
+                    color: look.skin,
+                    shape: BoxShape.circle,
+                  ),
+                ),
               ),
-            ),
-            const SizedBox(height: 1),
-            Container(
-              width: 12,
-              height: 20,
-              decoration: BoxDecoration(
-                color: coat,
-                borderRadius: BorderRadius.circular(5),
+              // Kort haar of de aanzet van de knot als een kapje op het
+              // hoofd; kaal laat de kruin vrij.
+              if (look.hairStyle != _HairStyle.bald)
+                Positioned(
+                  top: 2,
+                  child: Container(
+                    width: 9,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: look.hairColor,
+                      borderRadius: const BorderRadius.vertical(
+                        top: Radius.circular(5),
+                      ),
+                    ),
+                  ),
+                ),
+              // Jas.
+              Positioned(
+                top: 12,
+                child: Container(
+                  width: 12,
+                  height: 20,
+                  decoration: BoxDecoration(
+                    color: look.coat,
+                    borderRadius: BorderRadius.circular(5),
+                  ),
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

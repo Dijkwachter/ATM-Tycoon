@@ -338,7 +338,21 @@ class TickEngine {
     // Transactiefases: start de volgende klant of laat de lopende
     // transactie een tick vorderen.
     final result = _advanceTransaction(s, atm);
-    return result.$1.withAtm(result.$2);
+    s = result.$1;
+    atm = result.$2;
+
+    // Geduld (Ontwerper dd 2026-07-06): hoe langer de rij, hoe groter de
+    // kans dat er iemand afhaakt. Zo pendelt de rij mee met de drukte in
+    // plaats van permanent vol te staan.
+    if (atm.queueLength > 0 &&
+        random.nextDouble() < atm.queueLength * kQueueImpatienceChance) {
+      atm = atm.copyWith(
+        queueLength: atm.queueLength - 1,
+        lostCustomers: atm.lostCustomers + 1,
+      );
+    }
+
+    return s.withAtm(atm);
   }
 
   /// Start of vordert de transactie van de voorste klant. Elke fase duurt

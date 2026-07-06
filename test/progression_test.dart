@@ -11,7 +11,7 @@ import 'helpers/states.dart';
 
 /// Laat een gescripte opname volledig doorlopen: klant in de rij, acht
 /// ticks fases, resolutie met spreiding midden (1,1), Bank Oranje (0,9),
-/// geen DCC en geen jam. Inkomen: 7 x 1,1 x 0,9 = 6,93 op level 1.
+/// geen DCC en geen jam. Inkomen: 8 x 1,1 x 0,9 = 7,92 op level 1.
 GameState runWithdrawal(GameState s) {
   final total = s.atms.first.totalServiceTicks;
   final engine = TickEngine(
@@ -30,12 +30,12 @@ GameState runWithdrawal(GameState s) {
 void main() {
   group('Mijlpalen (GDD 9.2)', () {
     test('het passeren van 750 totaal keert 150 uit', () {
-      // Een opname van 6,93 duwt het totaal over de eerste drempel.
+      // Een opname van 7,92 duwt het totaal over de eerste drempel.
       final s = runWithdrawal(singleAtmState(balance: 0, totalEarned: 749));
       expect(s.milestonesClaimed, 1);
-      expect(s.totalEarned, closeTo(749 + 6.93 + 150, 1e-9));
+      expect(s.totalEarned, closeTo(749 + 7.92 + 150, 1e-9));
       // Saldo: inkomen plus bonus minus de float-rente van acht ticks.
-      expect(s.balance, closeTo(6.93 + 150, 0.5));
+      expect(s.balance, closeTo(7.92 + 150, 0.5));
     });
 
     test('mijlpaalbonussen kunnen doorcascaderen', () {
@@ -45,7 +45,7 @@ void main() {
       expect(before.milestonesClaimed, 1);
       final s = runWithdrawal(before);
       expect(s.milestonesClaimed, 2);
-      expect(s.totalEarned, closeTo(1996 + 6.93 + 300, 1e-9));
+      expect(s.totalEarned, closeTo(1996 + 7.92 + 300, 1e-9));
     });
 
     test('levels volgen de totaal-verdiend-drempels', () {
@@ -302,7 +302,7 @@ void main() {
         s = engine.tick(s);
       }
       expect(s.atms.first.notesInCassette, kCassetteCapacityUnits - 3);
-      expect(s.totalEarned, closeTo(7.0 * 1.1 * 0.9 * 2.0, 1e-9));
+      expect(s.totalEarned, closeTo(8.0 * 1.1 * 0.9 * 2.0, 1e-9));
     });
   });
 }

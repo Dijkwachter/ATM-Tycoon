@@ -48,9 +48,9 @@ void main() {
 
         s = engine.tick(s);
         expect(s.atms.first.transaction, isNull);
-        expect(s.totalEarned, closeTo(7.0 * 1.1 * 0.9, 1e-9));
+        expect(s.totalEarned, closeTo(8.0 * 1.1 * 0.9, 1e-9));
         expect(s.atms.first.notesInCassette, kCassetteCapacityUnits - 1);
-        expect(s.atms.first.lifetimeEarned, closeTo(7.0 * 1.1 * 0.9, 1e-9));
+        expect(s.atms.first.lifetimeEarned, closeTo(8.0 * 1.1 * 0.9, 1e-9));
       },
     );
 
@@ -69,20 +69,21 @@ void main() {
       }
       expect(s.atms.first.transaction, isNull);
       // Klanttevredenheid level 5: multiplier 1,75.
-      expect(s.totalEarned, closeTo(7.0 * 1.75 * 1.1 * 0.9, 1e-9));
+      expect(s.totalEarned, closeTo(8.0 * 1.75 * 1.1 * 0.9, 1e-9));
     });
 
     test('een klant komt aan en stapt meteen naar de vrije automaat', () {
-      // Station om 12 uur: aanloopkans 0,55; roll 0,5 raakt.
-      final engine = TickEngine(random: FakeRandom(doubles: [0.5]));
+      // Station om 12 uur: aanloopkans 0,40; roll 0,3 raakt.
+      final engine = TickEngine(random: FakeRandom(doubles: [0.3]));
       final s = engine.tick(singleAtmState(balance: 0));
       expect(s.atms.first.transaction, isNotNull);
       expect(s.atms.first.queueLength, 0);
     });
 
     test('bij een volle rij lopen nieuwe klanten ongeduldig door', () {
-      // Level 1 lobby: maximaal 3 wachtenden.
-      final engine = TickEngine(random: FakeRandom(doubles: [0.5]));
+      // Level 1 lobby: maximaal 3 wachtenden. De aanloop-roll 0,3 raakt;
+      // de geduld-roll 0,999 laat de rest netjes staan.
+      final engine = TickEngine(random: FakeRandom(doubles: [0.3, 0.999]));
       var s = singleAtmState(queueLength: 3, balance: 0);
       expect(s.atms.first.queueCapacity, 3);
       s = engine.tick(s);
@@ -90,6 +91,17 @@ void main() {
       // De voorste wachtende is wel gewoon begonnen.
       expect(s.atms.first.transaction, isNotNull);
       expect(s.atms.first.queueLength, 2);
+    });
+
+    test('wachtende klanten verliezen hun geduld bij een lange rij', () {
+      // Aanloop mist (0,999); na de start staan er nog 2 in de rij en de
+      // geduld-roll 0,05 valt onder 2 x 0,06.
+      final engine = TickEngine(random: FakeRandom(doubles: [0.999, 0.05]));
+      var s = singleAtmState(queueLength: 3, balance: 0);
+      s = engine.tick(s);
+      expect(s.atms.first.queueLength, 1);
+      expect(s.atms.first.lostCustomers, 1);
+      expect(s.atms.first.transaction, isNotNull);
     });
 
     test('wachtrijcapaciteit groeit per level en TTW geeft bonusruimte', () {
@@ -105,8 +117,8 @@ void main() {
     });
 
     test('een lobby heeft buiten openingstijden nauwelijks aanloop', () {
-      // Station om 3 uur: factor 0,2. Lobby dicht: kans 0,2 x 0,15 x 0,55
-      // = 0,0165; roll 0,05 mist. TTW: kans 0,11; dezelfde roll raakt.
+      // Station om 3 uur: factor 0,2. Lobby dicht: kans 0,2 x 0,15 x 0,40
+      // = 0,012; roll 0,05 mist. TTW: kans 0,08; dezelfde roll raakt.
       final lobby = TickEngine(
         random: FakeRandom(doubles: [0.05]),
       ).tick(singleAtmState(hour: 3, balance: 0));
@@ -133,8 +145,8 @@ void main() {
         return s;
       }
 
-      expect(run(0.0).totalEarned, closeTo(7.0 * kIncomeSpreadMin * 0.9, 1e-9));
-      expect(run(1.0).totalEarned, closeTo(7.0 * kIncomeSpreadMax * 0.9, 1e-9));
+      expect(run(0.0).totalEarned, closeTo(8.0 * kIncomeSpreadMin * 0.9, 1e-9));
+      expect(run(1.0).totalEarned, closeTo(8.0 * kIncomeSpreadMax * 0.9, 1e-9));
     });
 
     test('de bank wordt gewogen naar aandeel gekozen', () {
@@ -150,7 +162,7 @@ void main() {
       for (var i = 0; i < 8; i++) {
         s = engine.tick(s);
       }
-      expect(s.totalEarned, closeTo(7.0 * 1.1 * 1.35, 1e-9));
+      expect(s.totalEarned, closeTo(8.0 * 1.1 * 1.35, 1e-9));
     });
 
     test('onvoldoende voorraad: de klant vangt bot en telt als wegloper', () {
@@ -217,17 +229,17 @@ void main() {
 
     test('toeristische locatie: 14% kans op 4 euro extra', () {
       final s = run(location: LocationType.station, dccRoll: 0.13);
-      expect(s.totalEarned, closeTo(7.0 * 1.1 * 0.9 + kDccBonusEur, 1e-9));
+      expect(s.totalEarned, closeTo(8.0 * 1.1 * 0.9 + kDccBonusEur, 1e-9));
     });
 
     test('normale locatie: dezelfde roll geeft geen DCC', () {
       final s = run(location: LocationType.winkel, dccRoll: 0.13);
-      expect(s.totalEarned, closeTo(7.0 * 1.1 * 0.9, 1e-9));
+      expect(s.totalEarned, closeTo(8.0 * 1.1 * 0.9, 1e-9));
     });
 
     test('normale locatie: onder 5% wel DCC', () {
       final s = run(location: LocationType.winkel, dccRoll: 0.04);
-      expect(s.totalEarned, closeTo(7.0 * 1.1 * 0.9 + kDccBonusEur, 1e-9));
+      expect(s.totalEarned, closeTo(8.0 * 1.1 * 0.9 + kDccBonusEur, 1e-9));
     });
   });
 
@@ -503,16 +515,16 @@ void main() {
 
   group('Events (GDD 6)', () {
     test('Koningsdag verdubbelt de aanloop van alle automaten', () {
-      // Zonder event mist roll 0,94 (kans 0,55); met Koningsdag is de
-      // kans 2 x 0,55 gecapt op 0,95 en raakt dezelfde roll.
+      // Zonder event mist roll 0,5 (kans 0,40); met Koningsdag is de
+      // kans 2 x 0,40 = 0,80 en raakt dezelfde roll.
       var s = singleAtmState(balance: 0);
       expect(
         TickEngine(
-          random: FakeRandom(doubles: [0.94]),
+          random: FakeRandom(doubles: [0.5]),
         ).tick(s).atms.first.transaction,
         isNull,
       );
-      final engine = TickEngine(random: FakeRandom(doubles: [0.94]));
+      final engine = TickEngine(random: FakeRandom(doubles: [0.5]));
       s = engine.fireEvent(s, GameEventType.kingsday);
       expect(s.activeEvent!.type, GameEventType.kingsday);
       final after = engine.tick(s);
@@ -524,9 +536,9 @@ void main() {
       var s = singleAtmState(hour: 3, housing: AtmHousing.ttw, balance: 0);
       s = engine.fireEvent(s, GameEventType.festival);
       expect(s.activeEvent!.targetAtmId, 0);
-      // Station om 3 uur: factor 0,2 x 3 = 0,6; aanloopkans 0,33 en roll
-      // 0,32 raakt nu wel.
-      final hit = TickEngine(random: FakeRandom(doubles: [0.32])).tick(s);
+      // Station om 3 uur: factor 0,2 x 3 = 0,6; aanloopkans 0,24 en roll
+      // 0,22 raakt nu wel.
+      final hit = TickEngine(random: FakeRandom(doubles: [0.22])).tick(s);
       expect(hit.atms.first.transaction, isNotNull);
     });
 
@@ -691,8 +703,8 @@ void main() {
     });
 
     test('een kapotte cassette halveert de aanloop van twee slots', () {
-      // Station om 12 uur: kans 0,55; met 1 van 2 cassettes werkend is
-      // dat 0,275. Roll 0,3 mist dan, terwijl hij zonder storing raakt.
+      // Station om 12 uur: kans 0,40; met 1 van 2 cassettes werkend is
+      // dat 0,20. Roll 0,3 mist dan, terwijl hij zonder storing raakt.
       const broken = Cassette(
         notes: 50,
         condition: 0.5,
@@ -704,7 +716,7 @@ void main() {
       expect(miss.atms.first.transaction, isNull);
 
       final hit = TickEngine(
-        random: FakeRandom(doubles: [0.2]),
+        random: FakeRandom(doubles: [0.15]),
       ).tick(twoCassetteState(first: broken, balance: 0));
       expect(hit.atms.first.transaction, isNotNull);
     });

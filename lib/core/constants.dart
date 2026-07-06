@@ -13,8 +13,16 @@ import '../models/enums.dart';
 /// aankomt, voor vermenigvuldiging met de druktefactor. In het
 /// wachtrijmodel (Ontwerper dd 2026-07-04) is dit de aanloop; de
 /// verwerkingssnelheid van de automaat bepaalt hoe snel de rij slinkt.
-/// Bron: Parameters!B5.
-const double kTransactionChancePerSecond = 0.55;
+/// Bron: Parameters!B5 (0,55), verlaagd naar 0,40 (Ontwerper dd
+/// 2026-07-06) zodat de rij alleen in piekvakken echt vol staat in
+/// plaats van permanent.
+const double kTransactionChancePerSecond = 0.40;
+
+/// Geduld van wachtende klanten (Ontwerper dd 2026-07-06): per tick is de
+/// kans dat er iemand uit de rij wegloopt evenredig met de rijlengte
+/// (rijlengte x deze kans, maximaal een wegloper per tick). Daardoor
+/// pendelt de rij mee met de drukte in plaats van permanent vol te staan.
+const double kQueueImpatienceChance = 0.06;
 
 /// Bovengrens op de aanloopkans na druktefactor. Bron: GDD 3.1 tabel
 /// Inkomsten ("max 0,95").
@@ -146,8 +154,10 @@ const double kRecyclerFunctionPremium = 250;
 
 /// Basisinkomen per opname in EUR per functionaliteit: de recycler heeft
 /// hogere basisinkomsten (dikkere transacties, stortbonussen apart).
-const double kDispenserBaseIncome = 7.0;
-const double kRecyclerBaseIncome = 9.0;
+/// Verhoogd van 7,0/9,0 (Ontwerper dd 2026-07-06) als compensatie voor de
+/// rustigere aanloop, zodat de progressiecurve op peil blijft.
+const double kDispenserBaseIncome = 8.0;
+const double kRecyclerBaseIncome = 10.5;
 
 /// Upgradekosten om level 2 tot en met 5 te bereiken.
 const List<double> kLevelUpgradeCost = [350, 840, 2016, 4838];
@@ -198,9 +208,10 @@ const double kRecyclerDepositShare = 0.3;
 const double kRecyclerDepositFee = 2.0;
 
 /// Openingstijden van panden met een lobby-automaat: daarbuiten is de
-/// aanloop minimaal en is de kast kwetsbaarder voor vandalisme.
+/// aanloop minimaal en is de kast kwetsbaarder voor vandalisme. Retail
+/// sluit doorgaans rond 20:00 (Ontwerper dd 2026-07-06).
 const int kLobbyOpeningHour = 7;
-const int kLobbyClosingHour = 22;
+const int kLobbyClosingHour = 20;
 
 /// Aanloopfactor voor een lobby-automaat buiten openingstijden.
 const double kLobbyClosedArrivalFactor = 0.15;
