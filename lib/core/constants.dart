@@ -44,10 +44,6 @@ const double kIncomeSpreadMax = 1.4;
 /// offline-berekening. Bron: Parameters!B7.
 const double kIncomeSpreadAvg = 1.1;
 
-/// Gemiddelde waarde van een biljet in de cassette, voor de float-rente.
-/// Bron: Parameters!B8.
-const double kAvgNoteValueEur = 40;
-
 /// Float-rente per seconde over de cashwaarde in alle cassettes.
 /// Kan het saldo nooit negatief maken. Bron: Parameters!B9.
 const double kFloatInterestPerSecond = 0.000012;
@@ -115,6 +111,16 @@ const int kCassetteCapacityUnits = 100;
 /// Maximaal aantal cassetteslots per automaat.
 const int kMaxCassettesPerAtm = 5;
 
+/// Vaste denominatie-configuratie van de cassetteslots (Ontwerper dd
+/// 2026-07-06): 10, 20, 50, 50 en 50 EUR; na de eerste prestige wordt het
+/// vijfde slot bij aankoop een 100 EUR-cassette
+/// ([kPrestigeFifthSlotDenomination]).
+const List<int> kCassetteDenominations = [10, 20, 50, 50, 50];
+
+/// Denominatie van het vijfde slot zodra het 100 euro biljet actief is
+/// (vanaf de eerste prestige, GDD 9.3).
+const int kPrestigeFifthSlotDenomination = 100;
+
 /// Vaste prijs van een extra cassette (leeg geleverd; een CIT-rit vult hem).
 /// Bron: Ontwerper dd 2026-07-04.
 const double kExtraCassettePrice = 500;
@@ -139,6 +145,25 @@ const double kCitVanPriceGrowth = 2.0;
 
 /// Duur van het vullen en repareren ter plaatse, in ticks.
 const int kServicingDurationTicks = 3;
+
+// ---------------------------------------------------------------------------
+// Servicemonteurs (Ontwerper dd 2026-07-06): storingen wachten op een
+// monteur die net als de CIT-wagen moet aanrijden, ter plaatse repareert
+// en daarna terugrijdt naar het depot.
+// ---------------------------------------------------------------------------
+
+/// Aantal monteurs waarmee een vers spel start.
+const int kStartingMechanics = 1;
+
+/// Maximale monteursploeg.
+const int kMaxMechanics = 4;
+
+/// Prijs van de tweede monteur; daarna exponentieel via
+/// [kMechanicPriceGrowth].
+const double kMechanicBasePrice = 1000;
+
+/// Prijsgroeifactor per extra monteur.
+const double kMechanicPriceGrowth = 2.0;
 
 // ---------------------------------------------------------------------------
 // Modulaire automaten: behuizing x functionaliteit x level 1-5.

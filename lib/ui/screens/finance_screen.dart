@@ -8,6 +8,7 @@ import '../../engine/game_controller.dart';
 import '../../models/cit_van.dart';
 import '../../models/enums.dart';
 import '../../models/game_state.dart';
+import '../../models/mechanic.dart';
 import '../format.dart';
 import '../theme.dart';
 import '../widgets/tactile_button.dart';
@@ -50,6 +51,8 @@ class FinanceScreen extends ConsumerWidget {
         _OverviewCard(state: state),
         const _SectionTitle('CIT-vloot'),
         _FleetCard(state: state, onBuyVan: controller.buyCitVan),
+        const _SectionTitle('Monteursploeg'),
+        _MechanicsCard(state: state, onBuyMechanic: controller.buyMechanic),
         const _SectionTitle('Banken en contracten'),
         for (final id in BankId.values)
           _BankCard(
@@ -217,6 +220,94 @@ class _FleetCard extends StatelessWidget {
                   : formatEuroCompact(state.nextCitVanPrice),
               color: AppColors.serviceButton,
               onPressed: !fleetFull && affordable ? onBuyVan : null,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Monteursbeheer (Ontwerper dd 2026-07-06): storingen wachten op een
+/// monteur die moet aanrijden; per monteur de status, plus de koopknop
+/// voor een extra monteur. Zijn ze allemaal onderweg, dan blijft een
+/// nieuwe storing liggen.
+class _MechanicsCard extends StatelessWidget {
+  const _MechanicsCard({required this.state, required this.onBuyMechanic});
+
+  final GameState state;
+  final VoidCallback onBuyMechanic;
+
+  String _mechanicStatus(ServiceMechanic mechanic) {
+    final target = state.atms
+        .where((a) => a.id == mechanic.targetAtmId)
+        .firstOrNull;
+    final where = target == null
+        ? ''
+        : ' - ${FinanceScreen._shortLocation(target.location)}';
+    return switch (mechanic.status) {
+      CitVanStatus.idle => 'stand-by bij het depot',
+      CitVanStatus.transitToAtm =>
+        'onderweg$where (${mechanic.ticksRemaining}s)',
+      CitVanStatus.servicing => 'repareert$where (${mechanic.ticksRemaining}s)',
+      CitVanStatus.returning => 'terugreis (${mechanic.ticksRemaining}s)',
+    };
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final crewFull = state.mechanics.length >= kMaxMechanics;
+    final affordable = state.balance >= state.nextMechanicPrice;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            for (final mechanic in state.mechanics)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 3),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.engineering_outlined,
+                      size: 18,
+                      color: mechanic.isIdle
+                          ? AppColors.incomePill
+                          : AppColors.ink.withValues(alpha: 0.6),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Monteur ${mechanic.id + 1}',
+                      style: const TextStyle(
+                        fontFamily: kTextFont,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 13,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        _mechanicStatus(mechanic),
+                        textAlign: TextAlign.right,
+                        style: TextStyle(
+                          fontFamily: kDigitFont,
+                          fontSize: 11.5,
+                          color: AppColors.ink.withValues(alpha: 0.7),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            const SizedBox(height: 8),
+            TactileButton(
+              label: crewFull ? 'Ploeg compleet' : 'Neem monteur aan',
+              sublabel: crewFull
+                  ? '$kMaxMechanics monteurs'
+                  : formatEuroCompact(state.nextMechanicPrice),
+              color: AppColors.warning,
+              onPressed: !crewFull && affordable ? onBuyMechanic : null,
             ),
           ],
         ),

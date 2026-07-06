@@ -154,6 +154,8 @@ class GameController extends Notifier<GameState> {
 
   void buyCitVan() => _apply((e, s) => e.buyCitVan(s));
 
+  void buyMechanic() => _apply((e, s) => e.buyMechanic(s));
+
   void upgradeAtm(int atmId) => _apply((e, s) => e.upgradeAtm(s, atmId));
 
   void buyUpgrade(UpgradeId id) => _apply((e, s) => e.buyUpgrade(s, id));

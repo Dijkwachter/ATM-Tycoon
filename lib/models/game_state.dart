@@ -5,6 +5,7 @@ import 'atm.dart';
 import 'bank.dart';
 import 'cit_van.dart';
 import 'enums.dart';
+import 'mechanic.dart';
 import 'staff.dart';
 import 'upgrade.dart';
 
@@ -44,6 +45,7 @@ class GameState {
     required this.upgrades,
     required this.staff,
     required this.citVans,
+    required this.mechanics,
     required this.prestigeLevel,
     required this.milestonesClaimed,
     required this.refillGoalRound,
@@ -70,6 +72,9 @@ class GameState {
       upgrades: [for (final id in UpgradeId.values) Upgrade(id: id)],
       staff: [for (final id in StaffId.values) Staff(id: id)],
       citVans: [for (var i = 0; i < kStartingCitVans; i++) CitVan(id: i)],
+      mechanics: [
+        for (var i = 0; i < kStartingMechanics; i++) ServiceMechanic(id: i),
+      ],
       prestigeLevel: 0,
       milestonesClaimed: 0,
       refillGoalRound: 0,
@@ -93,6 +98,9 @@ class GameState {
 
   /// De centrale CIT-vloot (Ontwerper dd 2026-07-04).
   final List<CitVan> citVans;
+
+  /// De monteursploeg met aanrijdsysteem (Ontwerper dd 2026-07-06).
+  final List<ServiceMechanic> mechanics;
 
   /// Aantal keer geprestiged (GDD 9.3).
   final int prestigeLevel;
@@ -246,6 +254,54 @@ class GameState {
   }
 
   // -------------------------------------------------------------------------
+  // Monteursploeg (Ontwerper dd 2026-07-06).
+  // -------------------------------------------------------------------------
+
+  /// Prijs van de volgende monteur: exponentieel per aanstelling; de
+  /// startmonteur(s) tellen niet mee.
+  double get nextMechanicPrice =>
+      kMechanicBasePrice *
+      math.pow(
+        kMechanicPriceGrowth,
+        math.max(0, mechanics.length - kStartingMechanics),
+      );
+
+  /// De eerste inzetbare monteur, of null als de hele ploeg onderweg is.
+  ServiceMechanic? get idleMechanic {
+    for (final mechanic in mechanics) {
+      if (mechanic.isIdle) {
+        return mechanic;
+      }
+    }
+    return null;
+  }
+
+  /// Of er al een monteur naar deze automaat onderweg is of er staat.
+  bool hasMechanicEnRouteTo(int atmId) => mechanics.any(
+    (m) =>
+        m.targetAtmId == atmId &&
+        (m.status == CitVanStatus.transitToAtm ||
+            m.status == CitVanStatus.servicing),
+  );
+
+  /// De monteur die bij deze automaat aan het repareren is, of null.
+  ServiceMechanic? mechanicRepairingAt(int atmId) {
+    for (final m in mechanics) {
+      if (m.targetAtmId == atmId && m.status == CitVanStatus.servicing) {
+        return m;
+      }
+    }
+    return null;
+  }
+
+  /// Vervangt een enkele monteur op basis van id.
+  GameState withMechanic(ServiceMechanic updated) {
+    return copyWith(
+      mechanics: [for (final m in mechanics) m.id == updated.id ? updated : m],
+    );
+  }
+
+  // -------------------------------------------------------------------------
   // Spreidingswet van de Nationale Bank (Ontwerper dd 2026-07-04).
   // -------------------------------------------------------------------------
 
@@ -297,13 +353,16 @@ class GameState {
       (hundredEuroNoteActive ? kHundredEuroNoteIncomeMultiplier : 1.0);
 
   /// Totale cashwaarde in alle cassettes (ook die in storing), voor de
-  /// float-rente (GDD 3.2).
+  /// float-rente (GDD 3.2): de som van biljetten maal hun denominatie
+  /// (Ontwerper dd 2026-07-06).
   double get totalFloatValue {
-    var notes = 0;
+    var value = 0.0;
     for (final atm in atms) {
-      notes += atm.totalNotes;
+      for (final cassette in atm.cassettes) {
+        value += cassette.cashValue;
+      }
     }
-    return notes * kAvgNoteValueEur;
+    return value;
   }
 
   Atm atmById(int id) => atms.firstWhere((a) => a.id == id);
@@ -316,6 +375,7 @@ class GameState {
     List<Upgrade>? upgrades,
     List<Staff>? staff,
     List<CitVan>? citVans,
+    List<ServiceMechanic>? mechanics,
     int? prestigeLevel,
     int? milestonesClaimed,
     int? refillGoalRound,
@@ -333,6 +393,7 @@ class GameState {
       upgrades: upgrades ?? this.upgrades,
       staff: staff ?? this.staff,
       citVans: citVans ?? this.citVans,
+      mechanics: mechanics ?? this.mechanics,
       prestigeLevel: prestigeLevel ?? this.prestigeLevel,
       milestonesClaimed: milestonesClaimed ?? this.milestonesClaimed,
       refillGoalRound: refillGoalRound ?? this.refillGoalRound,

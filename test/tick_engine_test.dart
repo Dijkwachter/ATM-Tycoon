@@ -390,15 +390,17 @@ void main() {
       );
     });
 
-    test('bij staat nul: uitval, voorrijkosten en reparatietimer', () {
+    test('bij staat nul: uitval, aanrijkosten en monteur uitgestuurd', () {
       final s = TickEngine(
         random: FakeRandom(),
       ).tick(singleAtmState(condition: kWearPerSecond, balance: 100));
       expect(s.atms.first.isBroken, isTrue);
-      expect(s.atms.first.repairSecondsRemaining, kRepairDurationSeconds);
-      // Lobby dispenser level 1: voorrijkosten 40, plus de float-rente
-      // over de onaangeroerde 100 biljetten.
-      const interest = 100 * kAvgNoteValueEur * kFloatInterestPerSecond;
+      // De monteur vertrekt dezelfde tick; de aanrijkosten (lobby
+      // dispenser level 1: 40) zijn geboekt, plus de float-rente over de
+      // onaangeroerde 100 biljetten van 10 euro.
+      expect(s.mechanics.single.status, CitVanStatus.transitToAtm);
+      expect(s.mechanics.single.targetAtmId, 0);
+      const interest = 100 * 10 * kFloatInterestPerSecond;
       expect(s.balance, closeTo(100 - kBreakdownCalloutBase - interest, 1e-9));
     });
 
@@ -420,8 +422,7 @@ void main() {
       ).tick(withFirstCassette(state, condition: 0.0001));
       expect(breaking.atms.first.isBroken, isTrue);
       // (40 + 20 + 20) x levelfactor 1,0 x IBNS-korting 0,92.
-      const interest =
-          kCassetteCapacityUnits * kAvgNoteValueEur * kFloatInterestPerSecond;
+      const interest = kCassetteCapacityUnits * 10 * kFloatInterestPerSecond;
       expect(breaking.balance, closeTo(1000 - 80 * 0.92 - interest, 1e-9));
     });
 
@@ -430,58 +431,140 @@ void main() {
         random: FakeRandom(),
       ).tick(singleAtmState(level: 5, condition: 0.0001, balance: 100));
       expect(s.atms.first.isBroken, isTrue);
-      const interest =
-          kCassetteCapacityUnits * kAvgNoteValueEur * kFloatInterestPerSecond;
+      const interest = kCassetteCapacityUnits * 10 * kFloatInterestPerSecond;
       expect(
         s.balance,
         closeTo(100 - kBreakdownCalloutBase * 0.5 - interest, 1e-9),
       );
     });
 
-    test('voorrijkosten brengen het saldo nooit onder nul', () {
+    test('aanrijkosten brengen het saldo nooit onder nul', () {
       final s = TickEngine(
         random: FakeRandom(),
       ).tick(singleAtmState(condition: kWearPerSecond, balance: 10));
       expect(s.balance, 0);
+      // De nood-trip komt er ook met een lege kas.
+      expect(s.mechanics.single.isIdle, isFalse);
     });
 
-    test('reparatie telt af en herstelt de staat naar 100%', () {
+    test('een storing wacht op de monteur: aanrijden, repareren, terug', () {
       final engine = TickEngine(random: FakeRandom());
-      var s = engine.tick(singleAtmState(condition: kWearPerSecond));
-      expect(s.atms.first.repairSecondsRemaining, kRepairDurationSeconds);
+      var s = engine.tick(
+        singleAtmState(condition: kWearPerSecond, balance: 1000),
+      );
+      expect(s.atms.first.isBroken, isTrue);
+      final travel = s.travelTicksTo(LocationType.station);
+      expect(s.mechanics.single.ticksRemaining, travel);
+
+      // Aanrijden: de storing blijft zolang gewoon staan.
+      for (var i = 0; i < travel; i++) {
+        s = engine.tick(s);
+        expect(s.atms.first.isBroken, isTrue);
+      }
+      expect(s.mechanics.single.status, CitVanStatus.servicing);
+      expect(s.mechanics.single.ticksRemaining, kRepairDurationSeconds);
+
+      // Repareren ter plaatse.
       for (var i = 0; i < kRepairDurationSeconds; i++) {
         s = engine.tick(s);
       }
       expect(s.atms.first.isBroken, isFalse);
-      expect(s.atms.first.condition, 1.0);
+      // De reparatie landt aan het begin van de tick; dezelfde tick
+      // slijt de verse cassette alweer een fractie.
+      expect(s.atms.first.condition, closeTo(1 - kWearPerSecond, 1e-9));
+      expect(s.mechanics.single.status, CitVanStatus.returning);
+
+      // Terugreis: pas daarna is de monteur weer inzetbaar.
+      for (var i = 0; i < travel; i++) {
+        s = engine.tick(s);
+      }
+      expect(s.mechanics.single.isIdle, isTrue);
+      expect(s.mechanics.single.targetAtmId, isNull);
     });
 
-    test('met monteur duurt een reparatie 12 seconden', () {
-      final state = withStaffHired(
-        singleAtmState(condition: kWearPerSecond),
-        StaffId.mechanic,
+    test('met monteur Sven duurt de reparatie ter plaatse 12 seconden', () {
+      final engine = TickEngine(random: FakeRandom());
+      var s = engine.tick(
+        withStaffHired(
+          singleAtmState(condition: kWearPerSecond),
+          StaffId.mechanic,
+        ),
       );
-      final s = TickEngine(random: FakeRandom()).tick(state);
-      expect(
-        s.atms.first.repairSecondsRemaining,
-        kRepairDurationMechanicSeconds,
-      );
+      final travel = s.travelTicksTo(LocationType.station);
+      for (var i = 0; i < travel; i++) {
+        s = engine.tick(s);
+      }
+      expect(s.mechanics.single.status, CitVanStatus.servicing);
+      expect(s.mechanics.single.ticksRemaining, kRepairDurationMechanicSeconds);
     });
 
-    test('meehelpen: elke tik versnelt 3 seconden en kan afronden', () {
+    test('meehelpen kan alleen met de monteur ter plaatse', () {
       final engine = TickEngine(random: FakeRandom());
       var s = engine.tick(singleAtmState(condition: kWearPerSecond));
-      final before = s.atms.first.repairSecondsRemaining;
+      // Onderweg helpt tikken nog niet.
+      final enRoute = engine.tapRepair(s, 0);
+      expect(
+        enRoute.mechanics.single.ticksRemaining,
+        s.mechanics.single.ticksRemaining,
+      );
+
+      final travel = s.travelTicksTo(LocationType.station);
+      for (var i = 0; i < travel; i++) {
+        s = engine.tick(s);
+      }
+      expect(s.mechanics.single.status, CitVanStatus.servicing);
+      final before = s.mechanics.single.ticksRemaining;
       s = engine.tapRepair(s, 0);
       expect(
-        s.atms.first.repairSecondsRemaining,
+        s.mechanics.single.ticksRemaining,
         before - kRepairTapSpeedupSeconds,
       );
 
-      var almostDone = withFirstCassette(s, repairSecondsRemaining: 2);
-      almostDone = engine.tapRepair(almostDone, 0);
-      expect(almostDone.atms.first.isBroken, isFalse);
-      expect(almostDone.atms.first.condition, 1.0);
+      // Bijna klaar: een tik rondt af en stuurt de monteur terug.
+      s = s.withMechanic(s.mechanics.single.copyWith(ticksRemaining: 2));
+      s = engine.tapRepair(s, 0);
+      expect(s.atms.first.isBroken, isFalse);
+      expect(s.atms.first.condition, 1.0);
+      expect(s.mechanics.single.status, CitVanStatus.returning);
+    });
+
+    test('een tweede storing wacht tot er een monteur vrij is', () {
+      final engine = TickEngine(random: FakeRandom());
+      var s = GameState.initial(
+        nextEventInSeconds: 1000000,
+      ).copyWith(balance: 5000, totalEarned: 100000);
+      s = engine.buyAtm(s, LocationType.station);
+      s = engine.buyAtm(s, LocationType.winkel);
+      s = withFirstCassette(s, condition: kWearPerSecond);
+      s = s.withAtm(
+        s.atms.last.withCassette(
+          0,
+          s.atms.last.cassettes.first.copyWith(condition: kWearPerSecond),
+        ),
+      );
+      // Beide breken deze tick, maar er is maar een monteur: de tweede
+      // storing blijft onbediend liggen.
+      s = engine.tick(s);
+      expect(s.atms.first.isBroken, isTrue);
+      expect(s.atms.last.isBroken, isTrue);
+      expect(s.mechanics.single.targetAtmId, 0);
+      expect(s.hasMechanicEnRouteTo(1), isFalse);
+    });
+
+    test('monteurs aannemen: exponentiele prijs en maximum', () {
+      final engine = TickEngine(random: FakeRandom());
+      var s = singleAtmState(balance: 100000);
+      expect(s.nextMechanicPrice, kMechanicBasePrice);
+      s = engine.buyMechanic(s);
+      expect(s.mechanics.length, 2);
+      expect(s.balance, 100000 - kMechanicBasePrice);
+      expect(s.nextMechanicPrice, kMechanicBasePrice * kMechanicPriceGrowth);
+
+      for (var i = 0; i < 10; i++) {
+        s = s.copyWith(balance: 1000000);
+        s = engine.buyMechanic(s);
+      }
+      expect(s.mechanics.length, kMaxMechanics);
     });
 
     test('preventief onderhoud is gratis en alleen onder 90% staat', () {
@@ -497,12 +580,32 @@ void main() {
   });
 
   group('Float-rente (GDD 3.2)', () {
-    test('rente loopt over de cashwaarde van alle cassettes', () {
+    test('rente loopt over de biljetwaarde per denominatie', () {
+      // Slot 1 is een 10 euro-cassette: 100 eenheden x 10 euro.
       final s = TickEngine(
         random: FakeRandom(),
       ).tick(singleAtmState(balance: 100));
-      const expected = 100 - 100 * kAvgNoteValueEur * kFloatInterestPerSecond;
+      const expected = 100 - 100 * 10 * kFloatInterestPerSecond;
       expect(s.balance, closeTo(expected, 1e-9));
+    });
+
+    test('een duurder slot draagt zwaarder mee in de float', () {
+      final ten = singleAtmState();
+      final engine = TickEngine(random: FakeRandom());
+      var withFifty = singleAtmState(balance: 1000);
+      withFifty = engine.buyCassette(withFifty, 0);
+      withFifty = engine.buyCassette(withFifty.copyWith(balance: 1000), 0);
+      // Slots 2 (20) en 3 (50) zijn leeg geleverd: alleen slot 1 telt.
+      expect(ten.totalFloatValue, 100 * 10);
+      expect(withFifty.totalFloatValue, 100 * 10);
+      // Vul slot 3 (50 euro) en de float springt omhoog.
+      final filled = withFifty.withAtm(
+        withFifty.atms.first.withCassette(
+          2,
+          withFifty.atms.first.cassettes[2].copyWith(notes: 10),
+        ),
+      );
+      expect(filled.totalFloatValue, 100 * 10 + 10 * 50);
     });
 
     test('float-rente kan het saldo nooit negatief maken', () {
@@ -759,30 +862,43 @@ void main() {
       expect(s.balance, lessThan(100));
     });
 
-    test('volledig kapot: alleen de reparatietimers lopen', () {
+    test('volledig kapot: storingen wachten en de monteur repareert alles', () {
       final engine = TickEngine(random: FakeRandom());
       var s = twoCassetteState(
         first: const Cassette(
           notes: 10,
           condition: 0,
-          repairSecondsRemaining: 2,
+          repairSecondsRemaining: 30,
         ),
         second: const Cassette(
           notes: 10,
           condition: 0,
-          repairSecondsRemaining: 5,
+          repairSecondsRemaining: 30,
         ),
       );
       expect(s.atms.first.isBroken, isTrue);
+      // Zonder monteur ter plaatse verandert er niets aan de storing.
       s = engine.tick(s);
-      expect(s.atms.first.cassettes[0].repairSecondsRemaining, 1);
-      expect(s.atms.first.cassettes[1].repairSecondsRemaining, 4);
-      s = engine.tick(s);
-      // De eerste cassette is klaar: staat 100%, inhoud behouden.
-      expect(s.atms.first.cassettes[0].isBroken, isFalse);
-      expect(s.atms.first.cassettes[0].condition, 1.0);
-      expect(s.atms.first.cassettes[0].notes, 10);
+      expect(s.atms.first.cassettes[0].isBroken, isTrue);
+      expect(s.atms.first.cassettes[1].isBroken, isTrue);
+      expect(s.mechanics.single.status, CitVanStatus.transitToAtm);
+
+      // Monteur laten aankomen en de klus laten afronden: een bezoek
+      // repareert alle cassettes, met behoud van inhoud.
+      final travel = s.travelTicksTo(LocationType.station);
+      for (var i = 0; i < travel + kRepairDurationSeconds; i++) {
+        s = engine.tick(s);
+      }
       expect(s.atms.first.isBroken, isFalse);
+      // De reparatie landt aan het begin van de tick; dezelfde tick slijt
+      // de actieve (eerste) cassette alweer een fractie.
+      expect(
+        s.atms.first.cassettes[0].condition,
+        closeTo(1 - kWearPerSecond, 1e-9),
+      );
+      expect(s.atms.first.cassettes[1].condition, 1.0);
+      expect(s.atms.first.cassettes[0].notes, 10);
+      expect(s.atms.first.cassettes[1].notes, 10);
     });
 
     test('preventief onderhoud herstelt alleen de werkende cassettes', () {
@@ -1074,6 +1190,50 @@ void main() {
       }
       expect(s.atms.first.level, Atm.kMaxAtmLevel);
       expect(s.atms.first.nextLevelCost, isNull);
+    });
+  });
+
+  group('Cassette-denominaties (Ontwerper dd 2026-07-06)', () {
+    test('slots volgen de vaste configuratie 10/20/50/50/50', () {
+      final engine = TickEngine(random: FakeRandom());
+      var s = singleAtmState(balance: 10000);
+      expect(s.atms.first.cassettes.single.denomination, 10);
+      for (var i = 0; i < 4; i++) {
+        s = engine.buyCassette(s, 0);
+      }
+      expect([
+        for (final c in s.atms.first.cassettes) c.denomination,
+      ], kCassetteDenominations);
+    });
+
+    test('na prestige wordt het vijfde slot een 100 euro-cassette', () {
+      final engine = TickEngine(random: FakeRandom());
+      var s = singleAtmState(balance: 10000).copyWith(prestigeLevel: 1);
+      expect(s.hundredEuroNoteActive, isTrue);
+      for (var i = 0; i < 4; i++) {
+        s = engine.buyCassette(s, 0);
+      }
+      expect(
+        [for (final c in s.atms.first.cassettes) c.denomination],
+        [10, 20, 50, 50, kPrestigeFifthSlotDenomination],
+      );
+    });
+
+    test('CIT-servicing behoudt de denominatie per slot', () {
+      final engine = TickEngine(random: FakeRandom());
+      var s = singleAtmState(balance: 10000);
+      s = engine.buyCassette(s, 0);
+      s = withFirstCassette(s, notes: 0, condition: 0.3);
+      s = engine.requestService(s, 0);
+      final travel = s.travelTicksTo(LocationType.station);
+      for (var i = 0; i < travel + kServicingDurationTicks; i++) {
+        s = engine.tick(s);
+      }
+      expect(
+        [for (final c in s.atms.first.cassettes) c.denomination],
+        [10, 20],
+      );
+      expect(s.atms.first.cassettes[1].notes, kCassetteCapacityUnits);
     });
   });
 }

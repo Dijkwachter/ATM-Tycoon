@@ -528,10 +528,10 @@ class _AtmDetailSheet extends ConsumerWidget {
               const SizedBox(height: 10),
               for (var i = 0; i < atm.cassettes.length; i++)
                 _detailRow(
-                  'Slot ${i + 1}',
+                  'Slot ${i + 1} '
+                  '(€${atm.cassettes[i].denomination})',
                   atm.cassettes[i].isBroken
-                      ? 'storing '
-                            '${atm.cassettes[i].repairSecondsRemaining.ceil()}s'
+                      ? 'storing - wacht op monteur'
                       : '${formatEuro((atm.cassettes[i].notes * kNotesPerUnit).toDouble(), decimals: 0)}'
                             ' biljetten - staat '
                             '${(atm.cassettes[i].condition * 100).round()}%',
@@ -543,7 +543,9 @@ class _AtmDetailSheet extends ConsumerWidget {
                     '(${atm.cassettes.length} van $kMaxCassettesPerAtm)',
                 sublabel: slotsFree
                     ? '${formatEuroCompact(kExtraCassettePrice)} - '
-                          'leeg geleverd'
+                          'volgende: €'
+                          '${state.hundredEuroNoteActive && atm.cassettes.length == kMaxCassettesPerAtm - 1 ? kPrestigeFifthSlotDenomination : kCassetteDenominations[atm.cassettes.length]}'
+                          ' (leeg geleverd)'
                     : 'alle slots bezet',
                 color: AppColors.gradientBottom,
                 textColor: AppColors.ink,

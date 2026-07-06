@@ -200,15 +200,35 @@ class AtmTile extends StatelessWidget {
     );
   }
 
-  /// Contextuele middenknop (GDD 10): meehelpen bij een cassettereparatie,
-  /// anders preventief onderhoud onder 90% staat.
+  /// Contextuele middenknop (GDD 10 en aanrijdsysteem Ontwerper dd
+  /// 2026-07-06): meehelpen zodra de monteur ter plaatse repareert, de
+  /// aanrijstatus tonen zolang hij onderweg is, anders preventief
+  /// onderhoud onder 90% staat.
   Widget _maintenanceButton() {
     if (atm.hasBrokenCassette) {
+      final repairing = state.mechanicRepairingAt(atm.id);
+      if (repairing != null) {
+        return TactileButton(
+          label: 'Help mee',
+          sublabel: '${repairing.ticksRemaining}s',
+          color: AppColors.warning,
+          onPressed: onRepairTap,
+        );
+      }
+      final enRoute = state.mechanics
+          .where(
+            (m) =>
+                m.targetAtmId == atm.id &&
+                m.status == CitVanStatus.transitToAtm,
+          )
+          .firstOrNull;
       return TactileButton(
-        label: 'Help mee',
-        sublabel: '${atm.repairSecondsRemaining.ceil()}s',
+        label: 'Monteur',
+        sublabel: enRoute == null
+            ? 'wacht op monteur'
+            : 'onderweg ${enRoute.ticksRemaining}s',
         color: AppColors.warning,
-        onPressed: onRepairTap,
+        onPressed: null,
       );
     }
     final available =
@@ -356,9 +376,27 @@ class _LiveScene extends StatelessWidget {
   final GameState state;
   final CitVan? incomingVan;
 
+  /// Status van de storing met de monteursfase (aanrijdsysteem).
+  String _brokenStatus(String prefix) {
+    final repairing = state.mechanicRepairingAt(atm.id);
+    if (repairing != null) {
+      return '$prefix: REPARATIE ${repairing.ticksRemaining}s';
+    }
+    final enRoute = state.mechanics
+        .where(
+          (m) =>
+              m.targetAtmId == atm.id && m.status == CitVanStatus.transitToAtm,
+        )
+        .firstOrNull;
+    if (enRoute != null) {
+      return '$prefix: MONTEUR ${enRoute.ticksRemaining}s';
+    }
+    return '$prefix: WACHT OP MONTEUR';
+  }
+
   String get _status {
     if (atm.isBroken) {
-      return 'STORING ${atm.repairSecondsRemaining.ceil()}s';
+      return _brokenStatus('STORING');
     }
     if (atm.isPausedByOutage) {
       return 'STROOM UIT ${atm.outageSecondsRemaining.ceil()}s';
@@ -367,7 +405,7 @@ class _LiveScene extends StatelessWidget {
       return 'SERVICING ${incomingVan!.ticksRemaining}s';
     }
     if (atm.hasBrokenCassette) {
-      return 'CASSETTE-STORING';
+      return _brokenStatus('CASSETTE');
     }
     if (atm.availableNotes == 0) {
       return 'CASSETTE LEEG';
@@ -866,8 +904,9 @@ class _Shutter extends StatelessWidget {
   }
 }
 
-/// Rij cassetteslots: per cassette een mini-balkje met de vulling; een
-/// cassette in storing kleurt rood met een moersleuteltje.
+/// Rij cassetteslots: per cassette een mini-balkje met de vulling en de
+/// denominatie van het slot; een cassette in storing kleurt rood met een
+/// moersleuteltje.
 class _CassetteSlots extends StatelessWidget {
   const _CassetteSlots({required this.atm, required this.ink});
 
@@ -904,17 +943,33 @@ class _CassetteSlots extends StatelessWidget {
                       : ink.withValues(alpha: 0.25),
                 ),
               ),
+              clipBehavior: Clip.antiAlias,
               child: cassette.isBroken
                   ? const Icon(Icons.build, size: 9, color: AppColors.warning)
-                  : FractionallySizedBox(
-                      alignment: Alignment.centerLeft,
-                      widthFactor: cassette.notes / kCassetteCapacityUnits,
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: AppColors.incomePill,
-                          borderRadius: BorderRadius.circular(3),
+                  : Stack(
+                      children: [
+                        FractionallySizedBox(
+                          alignment: Alignment.centerLeft,
+                          widthFactor: cassette.notes / kCassetteCapacityUnits,
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: AppColors.incomePill,
+                              borderRadius: BorderRadius.circular(3),
+                            ),
+                          ),
                         ),
-                      ),
+                        Center(
+                          child: Text(
+                            '€${cassette.denomination}',
+                            style: TextStyle(
+                              fontFamily: kDigitFont,
+                              fontSize: 8,
+                              fontWeight: FontWeight.w700,
+                              color: ink.withValues(alpha: 0.85),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
             ),
           ),

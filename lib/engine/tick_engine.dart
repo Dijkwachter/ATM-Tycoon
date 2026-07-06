@@ -6,6 +6,7 @@ import '../models/cassette.dart';
 import '../models/cit_van.dart';
 import '../models/enums.dart';
 import '../models/game_state.dart';
+import '../models/mechanic.dart';
 import 'feedback.dart';
 
 /// De tick-engine voert de volledige spellogica uit, een tick per seconde.
@@ -45,10 +46,12 @@ class TickEngine {
     var s = state.copyWith(tick: state.tick + 1);
     s = _advanceEvents(s);
     s = _advanceFleet(s);
+    s = _advanceMechanics(s);
     for (final atm in s.atms) {
       s = _tickAtm(s, s.atmById(atm.id));
     }
     s = _autoDispatch(s);
+    s = _dispatchMechanics(s);
     s = _applyFloatInterest(s);
     return s;
   }
@@ -244,28 +247,106 @@ class TickEngine {
   }
 
   // ---------------------------------------------------------------------
+  // Monteursploeg (Ontwerper dd 2026-07-06): het aanrijdsysteem.
+  // ---------------------------------------------------------------------
+
+  /// Laat elke monteur die onderweg is een tick vorderen: heenreis, dan
+  /// repareren ter plaatse ([GameState.repairDurationSeconds]; korter met
+  /// monteur Sven in dienst), dan de terugreis. Bij het afronden zijn
+  /// alle cassettes in storing van die automaat gerepareerd (staat 100%,
+  /// inhoud blijft - geld brengen is CIT-werk).
+  GameState _advanceMechanics(GameState s) {
+    for (final mechanicId in [for (final m in s.mechanics) m.id]) {
+      final mechanic = s.mechanics.firstWhere((m) => m.id == mechanicId);
+      if (mechanic.isIdle) {
+        continue;
+      }
+      final remaining = mechanic.ticksRemaining - 1;
+      if (remaining > 0) {
+        s = s.withMechanic(mechanic.copyWith(ticksRemaining: remaining));
+        continue;
+      }
+      switch (mechanic.status) {
+        case CitVanStatus.transitToAtm:
+          s = s.withMechanic(
+            mechanic.copyWith(
+              status: CitVanStatus.servicing,
+              ticksRemaining: s.repairDurationSeconds,
+            ),
+          );
+        case CitVanStatus.servicing:
+          final target = s.atms
+              .where((a) => a.id == mechanic.targetAtmId)
+              .firstOrNull;
+          if (target != null) {
+            s = s.withAtm(target.repaired());
+          }
+          final returnTicks = target == null
+              ? 1
+              : s.travelTicksTo(target.location);
+          s = s.withMechanic(
+            mechanic.copyWith(
+              status: CitVanStatus.returning,
+              ticksRemaining: returnTicks,
+            ),
+          );
+        case CitVanStatus.returning:
+          s = s.withMechanic(
+            mechanic.copyWith(
+              status: CitVanStatus.idle,
+              ticksRemaining: 0,
+              clearTarget: true,
+            ),
+          );
+        case CitVanStatus.idle:
+          break;
+      }
+    }
+    return s;
+  }
+
+  /// Stuurt vrije monteurs automatisch naar de oudste onbediende storing.
+  /// De aanrijkosten (nood-trip, gedempt door beveiligingslevel en IBNS)
+  /// worden bij vertrek in rekening gebracht; een nood-trip komt er ook
+  /// als de kas leeg is (het saldo klemt op nul).
+  GameState _dispatchMechanics(GameState s) {
+    final ibnsLevel = s.upgradeLevel(UpgradeId.ibns);
+    for (final mechanicId in [for (final m in s.mechanics) m.id]) {
+      final mechanic = s.mechanics.firstWhere((m) => m.id == mechanicId);
+      if (!mechanic.isIdle) {
+        continue;
+      }
+      final target = s.atms
+          .where((a) => a.hasBrokenCassette && !s.hasMechanicEnRouteTo(a.id))
+          .firstOrNull;
+      if (target == null) {
+        return s;
+      }
+      final callout =
+          target.calloutCost * (1 - kIbnsCalloutDiscountPerLevel * ibnsLevel);
+      s = _chargeUpTo(s, callout);
+      s = s.withMechanic(
+        mechanic.copyWith(
+          status: CitVanStatus.transitToAtm,
+          targetAtmId: target.id,
+          ticksRemaining: s.travelTicksTo(target.location),
+        ),
+      );
+    }
+    return s;
+  }
+
+  // ---------------------------------------------------------------------
   // Per automaat: slijtage, storingen, aanloop en transactiefases.
   // ---------------------------------------------------------------------
 
   GameState _tickAtm(GameState s, Atm atm) {
-    // Volledig in storing: alleen de reparatietimers lopen en de rij is
-    // weg (GDD 4).
-    final wasFullyBroken = atm.isBroken;
-    if (atm.hasBrokenCassette) {
-      atm = atm.copyWith(
-        cassettes: [
-          for (final c in atm.cassettes)
-            !c.isBroken
-                ? c
-                : c.repairSecondsRemaining - 1 <= 0
-                ? c.copyWith(repairSecondsRemaining: 0, condition: 1.0)
-                : c.copyWith(
-                    repairSecondsRemaining: c.repairSecondsRemaining - 1,
-                  ),
-        ],
-      );
-    }
-    if (wasFullyBroken) {
+    // Storingen wachten op de monteur (aanrijdsysteem, Ontwerper dd
+    // 2026-07-06): cassettes repareren zichzelf niet meer. Volledig in
+    // storing betekent dat de rij wegloopt en er niets gebeurt tot de
+    // monteur ter plaatse is; met een deels werkende kast draait de rest
+    // gewoon door.
+    if (atm.isBroken) {
       return s.withAtm(atm.copyWith(queueLength: 0, clearTransaction: true));
     }
     // Stroomstoring: gepauzeerd, geen slijtage, aanloop of transacties.
@@ -295,17 +376,14 @@ class TickEngine {
       ),
     );
 
-    // Bij staat nul vliegt die ene cassette in storing: voorrijkosten
-    // (nood-trip, gedempt door het beveiligingslevel en IBNS) en een
-    // gratis reparatietimer; de overige cassettes draaien door. Maximaal
-    // een storing per tick.
+    // Bij staat nul vliegt die ene cassette in storing en wacht hij op de
+    // monteur; de overige cassettes draaien door. De aanrijkosten worden
+    // pas in rekening gebracht wanneer de monteur vertrekt. Maximaal een
+    // storing per tick.
     final failingIndex = atm.cassettes.indexWhere(
       (c) => !c.isBroken && c.condition <= 0,
     );
     if (failingIndex >= 0) {
-      final callout =
-          atm.calloutCost * (1 - kIbnsCalloutDiscountPerLevel * ibnsLevel);
-      s = _chargeUpTo(s, callout);
       return s.withAtm(
         atm.withCassette(
           failingIndex,
@@ -710,10 +788,23 @@ class TickEngine {
         s.balance < kExtraCassettePrice) {
       return s;
     }
+    // Vaste denominatie-configuratie 10/20/50/50/50; na de eerste
+    // prestige is het vijfde slot een 100 EUR-cassette (Ontwerper dd
+    // 2026-07-06).
+    final slotIndex = atm.cassettes.length;
+    final denomination =
+        slotIndex == kMaxCassettesPerAtm - 1 && s.hundredEuroNoteActive
+        ? kPrestigeFifthSlotDenomination
+        : kCassetteDenominations[slotIndex];
     return s
         .copyWith(balance: s.balance - kExtraCassettePrice)
         .withAtm(
-          atm.copyWith(cassettes: [...atm.cassettes, const Cassette.empty()]),
+          atm.copyWith(
+            cassettes: [
+              ...atm.cassettes,
+              Cassette.empty(denomination: denomination),
+            ],
+          ),
         );
   }
 
@@ -730,6 +821,23 @@ class TickEngine {
       citVans: [
         ...s.citVans,
         CitVan(id: nextId),
+      ],
+    );
+  }
+
+  /// Stelt een extra servicemonteur aan, exponentieel duurder per
+  /// monteur, tot [kMaxMechanics] (Ontwerper dd 2026-07-06).
+  GameState buyMechanic(GameState s) {
+    final price = s.nextMechanicPrice;
+    if (s.mechanics.length >= kMaxMechanics || s.balance < price) {
+      return s;
+    }
+    final nextId = s.mechanics.map((m) => m.id).reduce(max) + 1;
+    return s.copyWith(
+      balance: s.balance - price,
+      mechanics: [
+        ...s.mechanics,
+        ServiceMechanic(id: nextId),
       ],
     );
   }
@@ -814,23 +922,23 @@ class TickEngine {
   /// Meehelpen met een reparatie: elke tik versnelt alle lopende
   /// cassettereparaties van deze automaat 3 seconden (GDD 4).
   GameState tapRepair(GameState s, int atmId) {
-    final atm = s.atmById(atmId);
-    if (!atm.hasBrokenCassette) {
+    // Meehelpen kan alleen als de monteur ter plaatse aan het repareren
+    // is (aanrijdsysteem, Ontwerper dd 2026-07-06): elke tik versnelt de
+    // klus 3 seconden en kan hem afronden.
+    final mechanic = s.mechanicRepairingAt(atmId);
+    if (mechanic == null) {
       return s;
     }
-    return s.withAtm(
-      atm.copyWith(
-        cassettes: [
-          for (final c in atm.cassettes)
-            !c.isBroken
-                ? c
-                : c.repairSecondsRemaining - kRepairTapSpeedupSeconds <= 0
-                ? c.copyWith(repairSecondsRemaining: 0, condition: 1.0)
-                : c.copyWith(
-                    repairSecondsRemaining:
-                        c.repairSecondsRemaining - kRepairTapSpeedupSeconds,
-                  ),
-        ],
+    final remaining = mechanic.ticksRemaining - kRepairTapSpeedupSeconds;
+    if (remaining > 0) {
+      return s.withMechanic(mechanic.copyWith(ticksRemaining: remaining));
+    }
+    final atm = s.atmById(atmId);
+    s = s.withAtm(atm.repaired());
+    return s.withMechanic(
+      mechanic.copyWith(
+        status: CitVanStatus.returning,
+        ticksRemaining: s.travelTicksTo(atm.location),
       ),
     );
   }

@@ -147,24 +147,44 @@ void main() {
       expect(atm.condition, 0);
     });
 
-    test('een kapotte cassette maakt offline zijn reparatie af', () {
+    test('een storing wacht offline op de monteur', () {
+      // Zonder monteur onderweg blijft de storing offline gewoon staan:
+      // reparaties lopen niet meer vanzelf (aanrijdsysteem).
       final s = withFirstCassette(
         singleAtmState(balance: 0),
-        repairSecondsRemaining: 100,
+        repairSecondsRemaining: 30,
       );
-
-      // Korter weg dan de reparatie duurt: alleen de timer loopt af.
-      final still = calculator.apply(s, const Duration(seconds: 40));
+      final still = calculator.apply(s, const Duration(hours: 1));
+      expect(still.state.atms.first.isBroken, isTrue);
       expect(still.income, 0);
-      expect(still.state.atms.first.repairSecondsRemaining, 60);
+    });
 
-      // Langer weg: reparatie klaar en staat hersteld. Cassettes die bij
-      // vertrek in storing stonden verdienen offline niet mee
-      // (vereenvoudiging); online pakt de automaat de draad weer op.
-      final done = calculator.apply(s, const Duration(hours: 1));
-      expect(done.state.atms.first.repairSecondsRemaining, 0);
-      expect(done.state.atms.first.condition, 1.0);
-      expect(done.income, 0);
+    test('een monteur onderweg rondt zijn reparatie offline af', () {
+      final engine = TickEngine(random: FakeRandom());
+      var s = withFirstCassette(
+        singleAtmState(balance: 0),
+        repairSecondsRemaining: 30,
+      );
+      // Een online tick stuurt de monteur uit.
+      s = engine.tick(s);
+      expect(s.mechanics.single.status, CitVanStatus.transitToAtm);
+      final travel = s.travelTicksTo(LocationType.station);
+
+      // Te kort voor de aankomst: de storing staat er nog.
+      final short = calculator.apply(s, const Duration(seconds: 10));
+      expect(short.state.atms.first.isBroken, isTrue);
+      expect(short.state.mechanics.single.ticksRemaining, travel - 10);
+      expect(short.income, 0);
+
+      // Lang genoeg voor heenreis, reparatie en terugreis: gerepareerd,
+      // de monteur weer inzetbaar en de kast verdiende daarna door.
+      final done = calculator.apply(
+        s,
+        Duration(seconds: travel * 2 + kRepairDurationSeconds),
+      );
+      expect(done.state.atms.first.isBroken, isFalse);
+      expect(done.state.mechanics.single.isIdle, isTrue);
+      expect(done.income, greaterThan(0));
     });
 
     test('werkende cassettes verdienen door terwijl een kapotte wacht', () {

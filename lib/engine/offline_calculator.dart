@@ -50,6 +50,7 @@ class OfflineCalculator {
     }
 
     var s = _advanceFleet(state, seconds.floor());
+    s = _advanceMechanics(s, seconds.floor());
 
     final offlineFactor = s.hasStaff(StaffId.regionalManager)
         ? kOfflineIncomeFactorRegionalManager
@@ -151,6 +152,77 @@ class OfflineCalculator {
     return s;
   }
 
+  /// Rondt lopende monteursritten offline af, met dezelfde fasering als
+  /// de CIT-wagens: haalt de monteur zijn reparatie binnen de
+  /// offline-tijd, dan zijn de storingen van zijn doelautomaat verholpen.
+  /// Nieuwe monteurs worden offline niet uitgestuurd (storingen wachten,
+  /// net als online, op een beschikbare monteur).
+  GameState _advanceMechanics(GameState s, int ticks) {
+    for (final mechanicId in [for (final m in s.mechanics) m.id]) {
+      final mechanic = s.mechanics.firstWhere((m) => m.id == mechanicId);
+      if (mechanic.isIdle) {
+        continue;
+      }
+      final target = s.atms
+          .where((a) => a.id == mechanic.targetAtmId)
+          .firstOrNull;
+      final returnTicks = target == null ? 1 : s.travelTicksTo(target.location);
+      final untilRepaired = switch (mechanic.status) {
+        CitVanStatus.transitToAtm =>
+          mechanic.ticksRemaining + s.repairDurationSeconds,
+        CitVanStatus.servicing => mechanic.ticksRemaining,
+        _ => 0,
+      };
+      if (mechanic.status == CitVanStatus.returning) {
+        s = s.withMechanic(
+          ticks >= mechanic.ticksRemaining
+              ? mechanic.copyWith(
+                  status: CitVanStatus.idle,
+                  ticksRemaining: 0,
+                  clearTarget: true,
+                )
+              : mechanic.copyWith(
+                  ticksRemaining: mechanic.ticksRemaining - ticks,
+                ),
+        );
+        continue;
+      }
+      if (ticks < untilRepaired) {
+        final inTransit =
+            mechanic.status == CitVanStatus.transitToAtm &&
+            ticks < mechanic.ticksRemaining;
+        s = s.withMechanic(
+          inTransit
+              ? mechanic.copyWith(
+                  ticksRemaining: mechanic.ticksRemaining - ticks,
+                )
+              : mechanic.copyWith(
+                  status: CitVanStatus.servicing,
+                  ticksRemaining: untilRepaired - ticks,
+                ),
+        );
+        continue;
+      }
+      if (target != null) {
+        s = s.withAtm(target.repaired());
+      }
+      final afterRepair = ticks - untilRepaired;
+      s = s.withMechanic(
+        afterRepair >= returnTicks
+            ? mechanic.copyWith(
+                status: CitVanStatus.idle,
+                ticksRemaining: 0,
+                clearTarget: true,
+              )
+            : mechanic.copyWith(
+                status: CitVanStatus.returning,
+                ticksRemaining: returnTicks - afterRepair,
+              ),
+      );
+    }
+    return s;
+  }
+
   /// Rekent een automaat deterministisch door en geeft de nieuwe automaat
   /// plus het (al met de offline-factor geschaalde) inkomen terug.
   (Atm, double) _runAtm(
@@ -161,21 +233,10 @@ class OfflineCalculator {
     required double bankRate,
     required double offlineFactor,
   }) {
-    // Cassettes in storing lopen alleen hun reparatietimer af; klaar
-    // betekent staat 100% met behoud van inhoud. Ze verdienen offline
-    // niet mee (vereenvoudiging aan de voorspelbare kant).
-    var updated = atm.copyWith(
-      cassettes: [
-        for (final c in atm.cassettes)
-          !c.isBroken
-              ? c
-              : c.repairSecondsRemaining > seconds
-              ? c.copyWith(
-                  repairSecondsRemaining: c.repairSecondsRemaining - seconds,
-                )
-              : c.copyWith(repairSecondsRemaining: 0, condition: 1.0),
-      ],
-    );
+    // Cassettes in storing wachten op de monteur (aanrijdsysteem) en
+    // verdienen offline niet mee; als een monteur onderweg was is dat in
+    // de monteursfase hiervoor al afgehandeld.
+    var updated = atm;
 
     // Verdienen doen alleen de cassettes die bij vertrek al werkten.
     final workingIndexes = [

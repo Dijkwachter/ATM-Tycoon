@@ -293,10 +293,27 @@ class Atm {
   }
 
   /// Na een afgeronde CIT-servicing: alle cassettes vol, staat 100% en
-  /// storingen verholpen (Ontwerper dd 2026-07-04).
+  /// storingen verholpen; de denominatie per slot blijft staan
+  /// (Ontwerper dd 2026-07-04 en 2026-07-06).
   Atm serviced() {
     return copyWith(
-      cassettes: [for (final _ in cassettes) const Cassette.full()],
+      cassettes: [
+        for (final c in cassettes) Cassette.full(denomination: c.denomination),
+      ],
+    );
+  }
+
+  /// Na een afgeronde monteursreparatie: alle storingen verholpen en de
+  /// staat terug op 100%; de inhoud blijft onaangeroerd (de monteur
+  /// brengt geen geld mee - dat doet de CIT).
+  Atm repaired() {
+    return copyWith(
+      cassettes: [
+        for (final c in cassettes)
+          c.isBroken
+              ? c.copyWith(repairSecondsRemaining: 0, condition: 1.0)
+              : c,
+      ],
     );
   }
 

@@ -110,14 +110,15 @@ void main() {
 
     await tester.tap(find.text('Financien'));
     await tester.pump();
-    expect(find.text('Banken en contracten'), findsOneWidget);
-    expect(find.text('Bank Oranje'), findsOneWidget);
+    expect(find.text('CIT-vloot'), findsOneWidget);
+    expect(find.text('Monteursploeg'), findsOneWidget);
     await tester.scrollUntilVisible(
       find.text('Zuiderbank'),
       200,
       scrollable: find.byType(Scrollable).last,
     );
     expect(find.text('Zuiderbank'), findsOneWidget);
+    expect(find.text('Bank Oranje'), findsOneWidget);
 
     await tearDownApp(tester);
   });

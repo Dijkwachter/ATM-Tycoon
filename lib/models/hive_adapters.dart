@@ -9,6 +9,7 @@ import 'cassette.dart';
 import 'cit_van.dart';
 import 'enums.dart';
 import 'game_state.dart';
+import 'mechanic.dart';
 import 'staff.dart';
 import 'upgrade.dart';
 
@@ -34,6 +35,10 @@ class AtmAdapter extends TypeAdapter<Atm> {
   /// Sentinel van het modulaire formaat (behuizing/functionaliteit/level).
   static const int formatV3 = -3;
 
+  /// Sentinel van het formaat met cassette-denominaties (Ontwerper dd
+  /// 2026-07-06).
+  static const int formatV4 = -4;
+
   /// Mapping van de vervallen tier-index naar de modulaire configuratie:
   /// lobbyBasic, lobbyPlus, ttwUnit, ttwRecycler.
   static const List<(AtmHousing, AtmFunction, int)> tierMigration = [
@@ -46,7 +51,7 @@ class AtmAdapter extends TypeAdapter<Atm> {
   @override
   void write(BinaryWriter writer, Atm obj) {
     writer
-      ..writeInt(formatV3)
+      ..writeInt(formatV4)
       ..writeInt(obj.id)
       ..writeInt(obj.housing.index)
       ..writeInt(obj.function.index)
@@ -60,15 +65,19 @@ class AtmAdapter extends TypeAdapter<Atm> {
       writer
         ..writeInt(c.notes)
         ..writeDouble(c.condition)
-        ..writeDouble(c.repairSecondsRemaining);
+        ..writeDouble(c.repairSecondsRemaining)
+        ..writeInt(c.denomination);
     }
   }
 
   @override
   Atm read(BinaryReader reader) {
     final first = reader.readInt();
+    if (first == formatV4) {
+      return _readModern(reader, withDenominations: true);
+    }
     if (first == formatV3) {
-      return _readV3(reader);
+      return _readModern(reader, withDenominations: false);
     }
     if (first == formatV2) {
       return _readV2(reader);
@@ -76,7 +85,9 @@ class AtmAdapter extends TypeAdapter<Atm> {
     return _readV1(reader, id: first);
   }
 
-  Atm _readV3(BinaryReader reader) {
+  /// V3 en v4 delen de lay-out; v3 mist alleen de denominatie per
+  /// cassette en krijgt die dan uit de vaste slotconfiguratie.
+  Atm _readModern(BinaryReader reader, {required bool withDenominations}) {
     final id = reader.readInt();
     final housing = AtmHousing.values[reader.readInt()];
     final function = AtmFunction.values[reader.readInt()];
@@ -92,6 +103,12 @@ class AtmAdapter extends TypeAdapter<Atm> {
           notes: reader.readInt(),
           condition: reader.readDouble(),
           repairSecondsRemaining: reader.readDouble(),
+          denomination: withDenominations
+              ? reader.readInt()
+              : kCassetteDenominations[math.min(
+                  i,
+                  kCassetteDenominations.length - 1,
+                )],
         ),
     ];
     return Atm(
@@ -122,6 +139,11 @@ class AtmAdapter extends TypeAdapter<Atm> {
           notes: reader.readInt(),
           condition: reader.readDouble(),
           repairSecondsRemaining: reader.readDouble(),
+          denomination:
+              kCassetteDenominations[math.min(
+                i,
+                kCassetteDenominations.length - 1,
+              )],
         ),
     ];
     final (housing, function, level) = tierMigration[tierIndex];
@@ -165,6 +187,11 @@ class AtmAdapter extends TypeAdapter<Atm> {
           }(),
           condition: condition,
           repairSecondsRemaining: repairSecondsRemaining,
+          denomination:
+              kCassetteDenominations[math.min(
+                i,
+                kCassetteDenominations.length - 1,
+              )],
         ),
     ];
     final (housing, function, level) = tierMigration[tierIndex];
@@ -327,6 +354,7 @@ class GameStateAdapter extends TypeAdapter<GameState> {
     }
     // Staartvelden (na de oude lay-out, zodat oude saves leesbaar blijven).
     writer.writeList(obj.citVans);
+    writer.writeList(obj.mechanics);
   }
 
   @override
@@ -349,6 +377,11 @@ class GameStateAdapter extends TypeAdapter<GameState> {
     final citVans = reader.availableBytes > 0
         ? reader.readList().cast<CitVan>()
         : [for (var i = 0; i < kStartingCitVans; i++) CitVan(id: i)];
+    // Tweede staartveld: de monteursploeg (Ontwerper dd 2026-07-06);
+    // oudere saves krijgen de startploeg.
+    final mechanics = reader.availableBytes > 0
+        ? reader.readList().cast<ServiceMechanic>()
+        : [for (var i = 0; i < kStartingMechanics; i++) ServiceMechanic(id: i)];
     return GameState(
       balance: balance,
       totalEarned: totalEarned,
@@ -357,6 +390,7 @@ class GameStateAdapter extends TypeAdapter<GameState> {
       upgrades: upgrades,
       staff: staff,
       citVans: citVans,
+      mechanics: mechanics,
       prestigeLevel: prestigeLevel,
       milestonesClaimed: milestonesClaimed,
       refillGoalRound: refillGoalRound,
@@ -364,6 +398,37 @@ class GameStateAdapter extends TypeAdapter<GameState> {
       tick: tick,
       nextEventInSeconds: nextEventInSeconds,
       activeEvent: activeEvent,
+    );
+  }
+}
+
+class ServiceMechanicAdapter extends TypeAdapter<ServiceMechanic> {
+  @override
+  final int typeId = 7;
+
+  @override
+  void write(BinaryWriter writer, ServiceMechanic obj) {
+    writer
+      ..writeInt(obj.id)
+      ..writeInt(obj.status.index)
+      ..writeInt(obj.ticksRemaining)
+      ..writeBool(obj.targetAtmId != null);
+    if (obj.targetAtmId != null) {
+      writer.writeInt(obj.targetAtmId!);
+    }
+  }
+
+  @override
+  ServiceMechanic read(BinaryReader reader) {
+    final id = reader.readInt();
+    final status = CitVanStatus.values[reader.readInt()];
+    final ticksRemaining = reader.readInt();
+    final hasTarget = reader.readBool();
+    return ServiceMechanic(
+      id: id,
+      status: status,
+      ticksRemaining: ticksRemaining,
+      targetAtmId: hasTarget ? reader.readInt() : null,
     );
   }
 }
@@ -378,6 +443,7 @@ void registerHiveAdapters() {
       ..registerAdapter(UpgradeAdapter())
       ..registerAdapter(StaffAdapter())
       ..registerAdapter(ActiveEventAdapter())
-      ..registerAdapter(CitVanAdapter());
+      ..registerAdapter(CitVanAdapter())
+      ..registerAdapter(ServiceMechanicAdapter());
   }
 }
