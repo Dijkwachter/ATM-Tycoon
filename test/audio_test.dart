@@ -1,7 +1,6 @@
 import 'package:atm_empire/audio/music_intensity.dart';
 import 'package:atm_empire/engine/feedback.dart';
 import 'package:atm_empire/engine/tick_engine.dart';
-import 'package:atm_empire/models/enums.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'helpers/fake_random.dart';
@@ -46,35 +45,45 @@ void main() {
     });
   });
 
-  group('muziekintensiteit', () {
-    test('tempo is laag in de nacht en hoog op de piek', () {
-      final night = singleAtmState(hour: 3);
-      final peak = singleAtmState(hour: 17);
-
-      expect(musicSpeedFor(night), lessThan(musicSpeedFor(peak)));
-      expect(musicSpeedFor(night), greaterThanOrEqualTo(0.95));
-      expect(musicSpeedFor(peak), lessThanOrEqualTo(1.30));
-    });
-
-    test('bijna lege cassette verhoogt het tempo', () {
-      final full = singleAtmState(hour: 12);
-      final low = singleAtmState(hour: 12, notesInCassette: 10);
-
-      expect(musicSpeedFor(low), greaterThan(musicSpeedFor(full)));
-    });
-
-    test('percussie zwijgt in rust en komt op bij lege cassettes', () {
-      final calm = singleAtmState(hour: 3);
+  group('muzieklagen (Ontwerper dd 2026-07-06)', () {
+    test('percussie zwijgt op een rustige kaart en fadet in met de '
+        'wachtrijen', () {
+      final calm = singleAtmState();
       expect(percussionLevelFor(calm), 0.0);
 
-      final low = singleAtmState(hour: 3, notesInCassette: 10);
-      expect(percussionLevelFor(low), greaterThanOrEqualTo(0.6));
+      final oneCustomer = withQueue(singleAtmState(), 1);
+      expect(percussionLevelFor(oneCustomer), greaterThan(0.0));
+
+      final busy = withQueue(singleAtmState(), 8);
+      expect(
+        percussionLevelFor(busy),
+        greaterThan(percussionLevelFor(oneCustomer)),
+      );
     });
 
-    test('percussie komt op bij drukte', () {
-      // Station om 17 uur zit in het spitsvenster (factor >= 1,2).
-      final busy = singleAtmState(location: LocationType.station, hour: 17);
-      expect(percussionLevelFor(busy), greaterThanOrEqualTo(0.35));
+    test('percussievolume is begrensd, hoe druk het ook wordt', () {
+      final packed = withQueue(singleAtmState(level: 5), 15);
+      expect(percussionLevelFor(packed), lessThanOrEqualTo(0.5));
+    });
+
+    test('pads zwijgen bij een stilstaande vloot en fadet in zodra er '
+        'voertuigen rijden', () {
+      final idle = singleAtmState();
+      expect(padsLevelFor(idle), 0.0);
+
+      // Een CIT-rit aanvragen zet een wagen op pad.
+      final engine = TickEngine(random: FakeRandom());
+      var s = singleAtmState(notesInCassette: 0);
+      s = engine.requestService(s, 0);
+      expect(padsLevelFor(s), greaterThan(0.0));
+      expect(padsLevelFor(s), lessThanOrEqualTo(0.45));
+    });
+
+    test('ook een rijdende monteur telt als actief voertuig', () {
+      final engine = TickEngine(random: FakeRandom());
+      var s = singleAtmState(notesInCassette: 0, repairSecondsRemaining: 1000);
+      s = engine.sendMechanic(s, 0);
+      expect(padsLevelFor(s), greaterThan(0.0));
     });
   });
 }

@@ -4,20 +4,43 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:just_audio/just_audio.dart';
 
-/// Speelt de soundtrack: een naadloze hoofdloop waarvan het tempo meegaat
-/// met de drukte, een percussielaag die opkomt bij drukte en bijna lege
-/// cassettes, en een belletjes-sting wanneer een cassette leeg raakt.
+/// Speelt de lo-fi ambient-soundtrack (Ontwerper dd 2026-07-06,
+/// vernieuwd audiosysteem): een rustige hoofdloop op constant tempo
+/// (1,00x, geen tempo-veranderingen meer) met twee complementaire lagen
+/// in exact hetzelfde tempo, dezelfde toonsoort en hetzelfde
+/// arrangement, die via volumefading naadloos in- en uitmengen:
+///
+/// - de percussielaag (shakers) fadet in met de netwerkactiviteit;
+/// - de pads-laag (warme melodielijn) fadet in wanneer er voertuigen
+///   (CIT of monteurs) onderweg zijn.
+///
+/// Alerts zijn subtiel: een zacht lo-fi bliepje bij een lege cassette en
+/// een mechanisch dubbelklikje van de Storings-Analist, beide binnen het
+/// frequentiebereik van de muziek.
 ///
 /// Alle audiocalls zijn defensief: op platforms zonder audio-plugin
-/// (flutter-tester, CI) wordt audio stil overgeslagen zodat de rest van de
-/// app gewoon werkt.
+/// (flutter-tester, CI) wordt audio stil overgeslagen zodat de rest van
+/// de app gewoon werkt.
 class GameAudio {
   AudioPlayer? _music;
   AudioPlayer? _percussion;
-  AudioPlayer? _sting;
+  AudioPlayer? _pads;
+  AudioPlayer? _blip;
+  AudioPlayer? _click;
   bool _muted = false;
-  double _lastSpeed = 1.0;
-  double _lastPercussion = 0.0;
+
+  /// Doelvolumes van de fade-lagen en de daadwerkelijk toegepaste
+  /// volumes; [update] beweegt per tick een stap naar het doel toe.
+  double _percussionTarget = 0.0;
+  double _padsTarget = 0.0;
+  double _percussionVolume = 0.0;
+  double _padsVolume = 0.0;
+
+  /// Fractie van de resterende afstand die per update overbrugd wordt:
+  /// een fade duurt zo enkele seconden (subtiel, geen sprongen).
+  static const double _fadeStep = 0.22;
+
+  static const double _musicVolume = 0.5;
 
   bool get muted => _muted;
 
@@ -25,76 +48,97 @@ class GameAudio {
     try {
       final music = AudioPlayer();
       final percussion = AudioPlayer();
-      final sting = AudioPlayer();
+      final pads = AudioPlayer();
+      final blip = AudioPlayer();
+      final click = AudioPlayer();
       await music.setAsset('assets/audio/loop_main.wav');
       await music.setLoopMode(LoopMode.one);
-      await music.setVolume(0.5);
+      await music.setVolume(_musicVolume);
       await percussion.setAsset('assets/audio/loop_perc.wav');
       await percussion.setLoopMode(LoopMode.one);
       await percussion.setVolume(0.0);
-      await sting.setAsset('assets/audio/sting_cassette_leeg.wav');
-      await sting.setVolume(0.9);
+      await pads.setAsset('assets/audio/loop_synth_pads.wav');
+      await pads.setLoopMode(LoopMode.one);
+      await pads.setVolume(0.0);
+      await blip.setAsset('assets/audio/sting_cassette_leeg.wav');
+      await blip.setVolume(0.8);
+      await click.setAsset('assets/audio/sting_alert.wav');
+      await click.setVolume(0.8);
       _music = music;
       _percussion = percussion;
-      _sting = sting;
+      _pads = pads;
+      _blip = blip;
+      _click = click;
       unawaited(music.play());
       unawaited(percussion.play());
+      unawaited(pads.play());
     } catch (e) {
       debugPrint('audio uitgeschakeld: $e');
       _music = null;
       _percussion = null;
-      _sting = null;
+      _pads = null;
+      _blip = null;
+      _click = null;
     }
   }
 
-  /// Neemt het nieuwe tempo en percussievolume over; kleine wijzigingen
-  /// worden overgeslagen zodat er niet elke tick platform-calls lopen.
-  void update({required double speed, required double percussionLevel}) {
-    final music = _music;
+  /// Neemt de nieuwe doelvolumes van de lagen over en fadet er per
+  /// aanroep (een keer per tick) een stap naartoe. Het tempo blijft
+  /// altijd 1,00x; kleine volumewijzigingen worden overgeslagen zodat er
+  /// niet elke tick platform-calls lopen.
+  void update({required double percussionLevel, required double padsLevel}) {
+    _percussionTarget = percussionLevel.clamp(0.0, 1.0);
+    _padsTarget = padsLevel.clamp(0.0, 1.0);
     final percussion = _percussion;
-    if (music == null || percussion == null) {
+    final pads = _pads;
+    if (percussion == null || pads == null) {
       return;
     }
-    if ((speed - _lastSpeed).abs() > 0.01) {
-      _lastSpeed = speed;
-      unawaited(music.setSpeed(speed).catchError((_) {}));
-      unawaited(percussion.setSpeed(speed).catchError((_) {}));
-    }
-    if ((percussionLevel - _lastPercussion).abs() > 0.05) {
-      _lastPercussion = percussionLevel;
-      if (!_muted) {
-        unawaited(percussion.setVolume(percussionLevel).catchError((_) {}));
-      }
+    _percussionVolume = _approach(_percussionVolume, _percussionTarget);
+    _padsVolume = _approach(_padsVolume, _padsTarget);
+    if (!_muted) {
+      unawaited(percussion.setVolume(_percussionVolume).catchError((_) {}));
+      unawaited(pads.setVolume(_padsVolume).catchError((_) {}));
     }
   }
 
-  /// Sting bij een leeggetrokken cassette.
-  void playCassetteEmpty() {
-    final sting = _sting;
-    if (sting == null || _muted) {
-      return;
-    }
-    unawaited(sting.seek(Duration.zero).then((_) => sting.play()));
+  double _approach(double current, double target) {
+    final next = current + (target - current) * _fadeStep;
+    // Onder een half procent afstand mag de fade landen.
+    return (next - target).abs() < 0.005 ? target : next;
   }
 
-  /// Audio-alert van de Storings-Analist (Ontwerper dd 2026-07-06) bij
-  /// verhoogd storingsrisico op een cassette; hergebruikt de sting.
-  void playJamRisk() => playCassetteEmpty();
+  /// Zacht lo-fi bliepje bij een leeggetrokken cassette.
+  void playCassetteEmpty() => _playSting(_blip);
 
-  /// Zet alle audio aan of uit (volume, spelers blijven lopen zodat
+  /// Subtiel mechanisch dubbelklikje van de Storings-Analist bij
+  /// verhoogd storingsrisico.
+  void playJamRisk() => _playSting(_click);
+
+  void _playSting(AudioPlayer? player) {
+    if (player == null || _muted) {
+      return;
+    }
+    unawaited(player.seek(Duration.zero).then((_) => player.play()));
+  }
+
+  /// Zet alle audio aan of uit (volume; de spelers blijven lopen zodat
   /// aanzetten direct weer klinkt).
   void setMuted(bool value) {
     _muted = value;
-    unawaited(_music?.setVolume(value ? 0 : 0.5).catchError((_) {}));
+    unawaited(_music?.setVolume(value ? 0 : _musicVolume).catchError((_) {}));
     unawaited(
-      _percussion?.setVolume(value ? 0 : _lastPercussion).catchError((_) {}),
+      _percussion?.setVolume(value ? 0 : _percussionVolume).catchError((_) {}),
     );
+    unawaited(_pads?.setVolume(value ? 0 : _padsVolume).catchError((_) {}));
   }
 
   Future<void> dispose() async {
     await _music?.dispose();
     await _percussion?.dispose();
-    await _sting?.dispose();
+    await _pads?.dispose();
+    await _blip?.dispose();
+    await _click?.dispose();
   }
 }
 

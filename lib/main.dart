@@ -124,14 +124,15 @@ class _AtmEmpireAppState extends ConsumerState<AtmEmpireApp>
     final controller = ref.read(gameControllerProvider.notifier);
     final brokenCount = state.atms.where((a) => a.isBroken).length;
 
-    // Muziek volgt de spelstaat: tempo met de drukte, percussie bij
-    // drukte en bijna lege cassettes.
+    // Muziek volgt de spelstaat via volumefading op constant tempo
+    // (Ontwerper dd 2026-07-06): shakers mengen in met de drukte in de
+    // wachtrijen, de pads-laag met voertuigen die onderweg zijn.
     ref.listen(gameControllerProvider, (_, next) {
       ref
           .read(gameAudioProvider)
           .update(
-            speed: musicSpeedFor(next),
             percussionLevel: percussionLevelFor(next),
+            padsLevel: padsLevelFor(next),
           );
     });
 
