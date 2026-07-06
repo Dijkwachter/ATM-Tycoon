@@ -137,6 +137,8 @@ class GameController extends Notifier<GameState> {
   void requestService(int atmId) =>
       _apply((e, s) => e.requestService(s, atmId));
 
+  void sendMechanic(int atmId) => _apply((e, s) => e.sendMechanic(s, atmId));
+
   void tapRepair(int atmId) => _apply((e, s) => e.tapRepair(s, atmId));
 
   void preventiveMaintenance(int atmId) =>

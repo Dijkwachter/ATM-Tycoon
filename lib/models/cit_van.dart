@@ -12,6 +12,7 @@ class CitVan {
     this.status = CitVanStatus.idle,
     this.targetAtmId,
     this.ticksRemaining = 0,
+    this.stopsRemaining = 0,
   });
 
   final int id;
@@ -23,12 +24,18 @@ class CitVan {
   /// Resterende ticks in de huidige fase.
   final int ticksRemaining;
 
+  /// Hoeveel stops de wagen deze rit nog mag maken na de huidige
+  /// (High-Capacity Kluis, Ontwerper dd 2026-07-06). 0 = na de huidige
+  /// stop direct terug naar het depot.
+  final int stopsRemaining;
+
   bool get isIdle => status == CitVanStatus.idle;
 
   CitVan copyWith({
     CitVanStatus? status,
     int? targetAtmId,
     int? ticksRemaining,
+    int? stopsRemaining,
     bool clearTarget = false,
   }) {
     return CitVan(
@@ -36,6 +43,7 @@ class CitVan {
       status: status ?? this.status,
       targetAtmId: clearTarget ? null : (targetAtmId ?? this.targetAtmId),
       ticksRemaining: ticksRemaining ?? this.ticksRemaining,
+      stopsRemaining: stopsRemaining ?? this.stopsRemaining,
     );
   }
 }

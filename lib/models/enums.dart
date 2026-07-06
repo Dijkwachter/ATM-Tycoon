@@ -45,10 +45,32 @@ enum UpgradeId {
   cassettes,
   ibns,
   citRoute,
+
+  /// Gepantserd chassis voor de CIT-vloot: overvallen onderweg worden
+  /// volledig afgeweerd (Ontwerper dd 2026-07-06, CiT-tabblad).
+  armoredChassis,
+
+  /// High-Capacity Kluis: een geldwagen kan per rit meerdere automaten
+  /// aandoen (1 extra stop per level).
+  vaultCapacity,
+
+  /// Gereedschap & Diagnose-software: verkort de reparatietijd van
+  /// monteurs ter plaatse (-20% per level).
+  toolkit,
+
+  /// Onderdelenmagazijn: monteurs rijden preventief uit naar automaten
+  /// waarvan de conditie onder de drempel zakt, zonder voorrijkosten.
+  partsDepot,
 }
 
 /// Personeel. Bron: GDD 7.2 tabel Medewerkers.
-enum StaffId { mechanic, citPlanner, analyst, regionalManager }
+enum StaffId {
+  mechanic,
+  citPlanner,
+  analyst,
+  regionalManager,
+  reliabilityAnalyst,
+}
 
 /// Random events. Bron: GDD 6 tabel Events.
 enum GameEventType { kingsday, festival, heistAttempt, powerOutage }

@@ -5,8 +5,9 @@ import 'package:flutter_svg/flutter_svg.dart';
 
 import '../theme.dart';
 
-/// Frosted-glass tabbar met SVG-iconen en een storingsbadge op Kaart
-/// (GDD 10).
+/// Frosted-glass tabbar met SVG-iconen (GDD 10). De storingsbadge staat
+/// op het Monteurs-tabblad: daar wordt de technische dienst aangestuurd
+/// (Ontwerper dd 2026-07-06).
 class FrostedTabBar extends StatelessWidget {
   const FrostedTabBar({
     super.key,
@@ -18,7 +19,7 @@ class FrostedTabBar extends StatelessWidget {
   final int index;
   final ValueChanged<int> onSelect;
 
-  /// Aantal automaten in storing, als badge op de Kaart-tab.
+  /// Aantal automaten in storing, als badge op de Monteurs-tab.
   final int brokenCount;
 
   @override
@@ -35,14 +36,16 @@ class FrostedTabBar extends StatelessWidget {
           ),
           child: Row(
             children: [
+              _tab(0, 'Kaart', 'assets/icons/tab_kaart.svg'),
+              _tab(1, 'CiT', 'assets/icons/tab_cit.svg'),
               _tab(
-                0,
-                'Kaart',
-                'assets/icons/tab_kaart.svg',
+                2,
+                'Monteurs',
+                'assets/icons/tab_monteurs.svg',
                 badge: brokenCount,
               ),
-              _tab(1, 'Upgrades', 'assets/icons/tab_upgrades.svg'),
-              _tab(2, 'Financien', 'assets/icons/tab_financien.svg'),
+              _tab(3, 'Upgrades', 'assets/icons/tab_upgrades.svg'),
+              _tab(4, 'Financien', 'assets/icons/tab_financien.svg'),
             ],
           ),
         ),

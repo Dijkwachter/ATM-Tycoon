@@ -194,10 +194,38 @@ class TickEngine {
   /// dan [kServicingDurationTicks] ticks vullen en repareren (alle
   /// cassettes vol en 100% staat), dan de terugreis; pas daarna is de
   /// wagen weer inzetbaar.
+  ///
+  /// Onderweg naar een automaat loopt de wagen per tick een kleine kans
+  /// op een overval (Ontwerper dd 2026-07-06): het verlies gaat van het
+  /// saldo af en de wagen keert onverrichter zake terug. Het Gepantserd
+  /// Chassis sluit overvallen volledig uit (er wordt dan ook geen kans
+  /// meer gerold). Met de High-Capacity Kluis rijdt de wagen na een
+  /// servicing door naar de volgende automaat die bijna leeg staat.
   GameState _advanceFleet(GameState s) {
+    final armored = s.upgradeLevel(UpgradeId.armoredChassis) > 0;
     for (final vanId in [for (final v in s.citVans) v.id]) {
       final van = s.citVans.firstWhere((v) => v.id == vanId);
       if (van.isIdle) {
+        continue;
+      }
+      // Overvalrisico tijdens de heenreis.
+      if (van.status == CitVanStatus.transitToAtm &&
+          !armored &&
+          random.nextDouble() < kCitRobberyChancePerTick) {
+        _emit(FeedbackType.robbery, kCitRobberyLoss, atmId: van.targetAtmId);
+        s = _chargeUpTo(s, kCitRobberyLoss);
+        // De wagen keert om: de terugweg is de al afgelegde afstand.
+        final target = s.atms.where((a) => a.id == van.targetAtmId).firstOrNull;
+        final totalTicks = target == null
+            ? van.ticksRemaining
+            : s.travelTicksTo(target.location);
+        s = s.withVan(
+          van.copyWith(
+            status: CitVanStatus.returning,
+            ticksRemaining: max(1, totalTicks - van.ticksRemaining),
+            stopsRemaining: 0,
+          ),
+        );
         continue;
       }
       final remaining = van.ticksRemaining - 1;
@@ -222,6 +250,22 @@ class TickEngine {
             _emit(FeedbackType.serviced, 0, atmId: target.id);
             s = _progressRefillGoal(s);
           }
+          // High-Capacity Kluis: nog stops over en ergens een bijna lege
+          // automaat? Dan direct door in plaats van terug naar het depot.
+          final nextStop = van.stopsRemaining > 0
+              ? _nextVaultStop(s, excludeAtmId: van.targetAtmId)
+              : null;
+          if (target != null && nextStop != null) {
+            s = s.withVan(
+              van.copyWith(
+                status: CitVanStatus.transitToAtm,
+                targetAtmId: nextStop.id,
+                ticksRemaining: s.travelTicksTo(nextStop.location),
+                stopsRemaining: van.stopsRemaining - 1,
+              ),
+            );
+            break;
+          }
           final returnTicks = target == null
               ? 1
               : s.travelTicksTo(target.location);
@@ -229,6 +273,7 @@ class TickEngine {
             van.copyWith(
               status: CitVanStatus.returning,
               ticksRemaining: returnTicks,
+              stopsRemaining: 0,
             ),
           );
         case CitVanStatus.returning:
@@ -236,6 +281,7 @@ class TickEngine {
             van.copyWith(
               status: CitVanStatus.idle,
               ticksRemaining: 0,
+              stopsRemaining: 0,
               clearTarget: true,
             ),
           );
@@ -244,6 +290,20 @@ class TickEngine {
       }
     }
     return s;
+  }
+
+  /// De volgende automaat voor een doorrijdende kluiswagen: de eerste die
+  /// onder [kVaultNextStopThreshold] van zijn capaciteit zit en waar nog
+  /// geen wagen naar onderweg is.
+  Atm? _nextVaultStop(GameState s, {int? excludeAtmId}) {
+    return s.atms
+        .where(
+          (a) =>
+              a.id != excludeAtmId &&
+              a.availableNotes < a.capacity * kVaultNextStopThreshold &&
+              !s.hasVanEnRouteTo(a.id),
+        )
+        .firstOrNull;
   }
 
   // ---------------------------------------------------------------------
@@ -309,6 +369,11 @@ class TickEngine {
   /// De aanrijkosten (nood-trip, gedempt door beveiligingslevel en IBNS)
   /// worden bij vertrek in rekening gebracht; een nood-trip komt er ook
   /// als de kas leeg is (het saldo klemt op nul).
+  ///
+  /// Met het Onderdelenmagazijn rijden overgebleven vrije monteurs daarna
+  /// preventief naar automaten waarvan de staat onder
+  /// [kPartsDepotThreshold] zakt, zonder voorrijkosten (Ontwerper dd
+  /// 2026-07-06): de acute storing voor zijn.
   GameState _dispatchMechanics(GameState s) {
     final ibnsLevel = s.upgradeLevel(UpgradeId.ibns);
     for (final mechanicId in [for (final m in s.mechanics) m.id]) {
@@ -320,7 +385,7 @@ class TickEngine {
           .where((a) => a.hasBrokenCassette && !s.hasMechanicEnRouteTo(a.id))
           .firstOrNull;
       if (target == null) {
-        return s;
+        break;
       }
       final callout =
           target.calloutCost * (1 - kIbnsCalloutDiscountPerLevel * ibnsLevel);
@@ -333,7 +398,65 @@ class TickEngine {
         ),
       );
     }
+    if (s.upgradeLevel(UpgradeId.partsDepot) > 0) {
+      s = _dispatchPreventive(s);
+    }
     return s;
+  }
+
+  /// Tweede ronde van het Onderdelenmagazijn: vrije monteurs naar slijtende
+  /// automaten, gratis (regulier onderhoud, geen nood-trip).
+  GameState _dispatchPreventive(GameState s) {
+    for (final mechanicId in [for (final m in s.mechanics) m.id]) {
+      final mechanic = s.mechanics.firstWhere((m) => m.id == mechanicId);
+      if (!mechanic.isIdle) {
+        continue;
+      }
+      final target = s.atms
+          .where(
+            (a) =>
+                a.isOperational &&
+                a.condition < kPartsDepotThreshold &&
+                !s.hasMechanicEnRouteTo(a.id),
+          )
+          .firstOrNull;
+      if (target == null) {
+        break;
+      }
+      s = s.withMechanic(
+        mechanic.copyWith(
+          status: CitVanStatus.transitToAtm,
+          targetAtmId: target.id,
+          ticksRemaining: s.travelTicksTo(target.location),
+        ),
+      );
+    }
+    return s;
+  }
+
+  /// Handmatige dispatch vanaf het Monteurs-tabblad: stuurt een vrije
+  /// monteur naar deze automaat als daar een storing openstaat en er nog
+  /// niemand onderweg is. Zelfde nood-tarief als de automatische dispatch.
+  GameState sendMechanic(GameState s, int atmId) {
+    final atm = s.atmById(atmId);
+    if (!atm.hasBrokenCassette || s.hasMechanicEnRouteTo(atmId)) {
+      return s;
+    }
+    final mechanic = s.idleMechanic;
+    if (mechanic == null) {
+      return s;
+    }
+    final ibnsLevel = s.upgradeLevel(UpgradeId.ibns);
+    final callout =
+        atm.calloutCost * (1 - kIbnsCalloutDiscountPerLevel * ibnsLevel);
+    s = _chargeUpTo(s, callout);
+    return s.withMechanic(
+      mechanic.copyWith(
+        status: CitVanStatus.transitToAtm,
+        targetAtmId: atmId,
+        ticksRemaining: s.travelTicksTo(atm.location),
+      ),
+    );
   }
 
   // ---------------------------------------------------------------------
@@ -375,6 +498,15 @@ class TickEngine {
         ),
       ),
     );
+
+    // Storings-Analist (Ontwerper dd 2026-07-06): een melding op het
+    // moment dat de actieve cassette de risicodrempel passeert. Een keer
+    // per passage: slijtage loopt alleen omlaag tot een monteur langskomt.
+    if (s.hasStaff(StaffId.reliabilityAnalyst) &&
+        activeCassette.condition >= kJamRiskConditionThreshold &&
+        atm.cassettes[activeIndex].condition < kJamRiskConditionThreshold) {
+      _emit(FeedbackType.jamRisk, 0, atmId: atm.id);
+    }
 
     // Bij staat nul vliegt die ene cassette in storing en wacht hij op de
     // monteur; de overige cassettes draaien door. De aanrijkosten worden
@@ -727,6 +859,9 @@ class TickEngine {
             status: CitVanStatus.transitToAtm,
             targetAtmId: atmId,
             ticksRemaining: s.travelTicksTo(atm.location),
+            // High-Capacity Kluis: zoveel extra stops als het upgradelevel;
+            // de rit kost maar een keer het rittarief.
+            stopsRemaining: s.upgradeLevel(UpgradeId.vaultCapacity),
           ),
         );
   }

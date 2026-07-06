@@ -212,12 +212,19 @@ class CitVanAdapter extends TypeAdapter<CitVan> {
   @override
   final int typeId = 6;
 
+  /// Sentinel van het formaat met stopsRemaining (High-Capacity Kluis,
+  /// Ontwerper dd 2026-07-06). Het oude formaat begint met de
+  /// nooit-negatieve id.
+  static const int formatV2 = -1;
+
   @override
   void write(BinaryWriter writer, CitVan obj) {
     writer
+      ..writeInt(formatV2)
       ..writeInt(obj.id)
       ..writeInt(obj.status.index)
       ..writeInt(obj.ticksRemaining)
+      ..writeInt(obj.stopsRemaining)
       ..writeBool(obj.targetAtmId != null);
     if (obj.targetAtmId != null) {
       writer.writeInt(obj.targetAtmId!);
@@ -226,14 +233,18 @@ class CitVanAdapter extends TypeAdapter<CitVan> {
 
   @override
   CitVan read(BinaryReader reader) {
-    final id = reader.readInt();
+    final first = reader.readInt();
+    final isV2 = first == formatV2;
+    final id = isV2 ? reader.readInt() : first;
     final status = CitVanStatus.values[reader.readInt()];
     final ticksRemaining = reader.readInt();
+    final stopsRemaining = isV2 ? reader.readInt() : 0;
     final hasTarget = reader.readBool();
     return CitVan(
       id: id,
       status: status,
       ticksRemaining: ticksRemaining,
+      stopsRemaining: stopsRemaining,
       targetAtmId: hasTarget ? reader.readInt() : null,
     );
   }
@@ -363,8 +374,22 @@ class GameStateAdapter extends TypeAdapter<GameState> {
     final totalEarned = reader.readDouble();
     final atms = reader.readList().cast<Atm>();
     final banks = reader.readList().cast<Bank>();
+    // Upgrades en personeel worden op enum-index geserialiseerd; nieuwe
+    // enum-waarden (Ontwerper dd 2026-07-06: gepantserd chassis, kluis,
+    // gereedschap, onderdelenmagazijn en de Storings-Analist) worden bij
+    // oudere saves op level 0 / niet-aangenomen aangevuld.
     final upgrades = reader.readList().cast<Upgrade>();
+    final paddedUpgrades = [
+      ...upgrades,
+      for (var i = upgrades.length; i < UpgradeId.values.length; i++)
+        Upgrade(id: UpgradeId.values[i]),
+    ];
     final staff = reader.readList().cast<Staff>();
+    final paddedStaff = [
+      ...staff,
+      for (var i = staff.length; i < StaffId.values.length; i++)
+        Staff(id: StaffId.values[i]),
+    ];
     final prestigeLevel = reader.readInt();
     final milestonesClaimed = reader.readInt();
     final refillGoalRound = reader.readInt();
@@ -387,8 +412,8 @@ class GameStateAdapter extends TypeAdapter<GameState> {
       totalEarned: totalEarned,
       atms: atms,
       banks: banks,
-      upgrades: upgrades,
-      staff: staff,
+      upgrades: paddedUpgrades,
+      staff: paddedStaff,
       citVans: citVans,
       mechanics: mechanics,
       prestigeLevel: prestigeLevel,

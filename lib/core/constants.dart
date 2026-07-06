@@ -146,6 +146,30 @@ const double kCitVanPriceGrowth = 2.0;
 /// Duur van het vullen en repareren ter plaatse, in ticks.
 const int kServicingDurationTicks = 3;
 
+/// Kans per tick dat een geldwagen op de heenreis overvallen wordt
+/// (Ontwerper dd 2026-07-06, CiT-tab): de rit wordt afgebroken en er
+/// gaat lading verloren. Het gepantserd chassis brengt dit naar nul.
+const double kCitRobberyChancePerTick = 0.001;
+
+/// Verlies in EUR bij een overval op een geldwagen.
+const double kCitRobberyLoss = 250;
+
+/// Gepantserd chassis: eenmalige upgrade die de overvalkans op de
+/// transit-fase naar 0% brengt.
+const double kArmoredChassisPrice = 2500;
+
+/// High-Capacity Kluis: basisprijs, groeifactor en maximum. Elk level
+/// geeft een geldwagen een extra stop per rit (route-planning): na een
+/// servicing rijdt hij direct door naar de volgende automaat die onder
+/// [kVaultNextStopThreshold] voorraad zit.
+const double kVaultUpgradeBasePrice = 800;
+const double kVaultUpgradeGrowth = 2;
+const int kVaultUpgradeMaxLevel = 3;
+
+/// Voorraadfractie waaronder een automaat als volgende stop van een
+/// multi-stop CIT-route in aanmerking komt.
+const double kVaultNextStopThreshold = 0.5;
+
 // ---------------------------------------------------------------------------
 // Servicemonteurs (Ontwerper dd 2026-07-06): storingen wachten op een
 // monteur die net als de CIT-wagen moet aanrijden, ter plaatse repareert
@@ -164,6 +188,27 @@ const double kMechanicBasePrice = 1000;
 
 /// Prijsgroeifactor per extra monteur.
 const double kMechanicPriceGrowth = 2.0;
+
+/// Gereedschap & diagnose-software (Monteurs-tab, Ontwerper dd
+/// 2026-07-06): verkort de reparatietijd ter plaatse met 20% per level.
+const double kToolkitBasePrice = 600;
+const double kToolkitGrowth = 2;
+const int kToolkitMaxLevel = 3;
+const double kToolkitReductionPerLevel = 0.2;
+
+/// Onderdelenmagazijn: eenmalige upgrade waarmee monteurs automatisch
+/// preventief langsrijden bij automaten onder [kPartsDepotThreshold]
+/// staat, voordat er een acute storing ontstaat. De rit is gratis (geen
+/// nood-tripkosten).
+const double kPartsDepotPrice = 3000;
+const double kPartsDepotThreshold = 0.85;
+
+/// Storings-analist (personeel, Monteurs-tab): eenmalige aankoop die een
+/// waarschuwing (audio-alert) geeft zodra een cassette onder
+/// [kJamRiskConditionThreshold] staat komt en dus verhoogd storingsrisico
+/// loopt.
+const double kStaffReliabilityAnalystPrice = 3500;
+const double kJamRiskConditionThreshold = 0.25;
 
 // ---------------------------------------------------------------------------
 // Modulaire automaten: behuizing x functionaliteit x level 1-5.
@@ -520,8 +565,10 @@ const double kCitRouteUpgradeBasePrice = 400;
 /// CIT-routeoptimalisatie: prijsgroeifactor per level. Bron: Upgrades!C6.
 const double kCitRouteUpgradeGrowth = 2;
 
-/// CIT-routeoptimalisatie: maximaal level. Bron: GDD 7.1 tabel Upgrades.
-const int kCitRouteUpgradeMaxLevel = 4;
+/// CIT-routeoptimalisatie (GPS): maximaal level. Bron: GDD 7.1 tabel
+/// Upgrades (4), verhoogd naar 5 voor de CiT-tab (Ontwerper dd
+/// 2026-07-06).
+const int kCitRouteUpgradeMaxLevel = 5;
 
 /// CIT-routeoptimalisatie: korting op ritkosten en reistijd per level,
 /// additief. Bron: Parameters!C18 en Upgrades!I6 ("-15% refillkosten");

@@ -88,6 +88,10 @@ class OfflineCalculator {
   /// Rondt lopende CIT-ritten offline af: haalt de wagen zijn servicing
   /// binnen de offline-tijd, dan worden de cassettes voor de doorrekening
   /// alvast gevuld en gerepareerd; anders schuift zijn fase-timer op.
+  ///
+  /// Bewust genegeerd offline (Ontwerper dd 2026-07-06): het overvalrisico
+  /// (kansproces, hoort bij de live tick-engine) en extra kluis-stops (de
+  /// wagen rijdt offline na zijn huidige stop terug naar het depot).
   GameState _advanceFleet(GameState s, int ticks) {
     for (final vanId in [for (final v in s.citVans) v.id]) {
       final van = s.citVans.firstWhere((v) => v.id == vanId);
@@ -141,11 +145,13 @@ class OfflineCalculator {
             ? van.copyWith(
                 status: CitVanStatus.idle,
                 ticksRemaining: 0,
+                stopsRemaining: 0,
                 clearTarget: true,
               )
             : van.copyWith(
                 status: CitVanStatus.returning,
                 ticksRemaining: returnTicks - afterService,
+                stopsRemaining: 0,
               ),
       );
     }

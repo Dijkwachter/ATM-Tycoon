@@ -77,6 +77,10 @@ class GameAudio {
     unawaited(sting.seek(Duration.zero).then((_) => sting.play()));
   }
 
+  /// Audio-alert van de Storings-Analist (Ontwerper dd 2026-07-06) bij
+  /// verhoogd storingsrisico op een cassette; hergebruikt de sting.
+  void playJamRisk() => playCassetteEmpty();
+
   /// Zet alle audio aan of uit (volume, spelers blijven lopen zodat
   /// aanzetten direct weer klinkt).
   void setMuted(bool value) {

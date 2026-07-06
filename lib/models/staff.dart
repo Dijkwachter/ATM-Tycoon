@@ -15,6 +15,7 @@ class Staff {
     StaffId.citPlanner => kStaffCitPlannerPrice,
     StaffId.analyst => kStaffAnalystPrice,
     StaffId.regionalManager => kStaffRegionalManagerPrice,
+    StaffId.reliabilityAnalyst => kStaffReliabilityAnalystPrice,
   };
 
   Staff copyWith({bool? hired}) => Staff(id: id, hired: hired ?? this.hired);

@@ -189,10 +189,10 @@ void main() {
       var maxed = withUpgradeLevel(
         singleAtmState(balance: 100000),
         UpgradeId.citRoute,
-        4,
+        kCitRouteUpgradeMaxLevel,
       );
       maxed = engine.buyUpgrade(maxed, UpgradeId.citRoute);
-      expect(maxed.upgradeLevel(UpgradeId.citRoute), 4);
+      expect(maxed.upgradeLevel(UpgradeId.citRoute), kCitRouteUpgradeMaxLevel);
       expect(maxed.balance, 100000);
     });
 

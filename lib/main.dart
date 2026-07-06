@@ -17,9 +17,11 @@ import 'engine/game_controller.dart';
 import 'models/hive_adapters.dart';
 import 'persistence/save_repository.dart';
 import 'ui/format.dart';
+import 'ui/screens/cit_screen.dart';
 import 'ui/screens/finance_screen.dart';
 import 'ui/screens/intro_screen.dart';
 import 'ui/screens/map_screen.dart';
+import 'ui/screens/mechanics_screen.dart';
 import 'ui/screens/upgrades_screen.dart';
 import 'ui/theme.dart';
 import 'ui/widgets/coin_rain.dart';
@@ -72,6 +74,10 @@ class _AtmEmpireAppState extends ConsumerState<AtmEmpireApp>
     _audioFeedback = controller.feedback.listen((event) {
       if (event.type == FeedbackType.cassetteEmpty) {
         audio.playCassetteEmpty();
+      } else if (event.type == FeedbackType.jamRisk) {
+        // Storings-Analist (Ontwerper dd 2026-07-06): audio-alert bij
+        // verhoogd storingsrisico.
+        audio.playJamRisk();
       }
     });
   }
@@ -168,6 +174,8 @@ class _AtmEmpireAppState extends ConsumerState<AtmEmpireApp>
                           index: _tabIndex,
                           children: const [
                             MapScreen(),
+                            CitScreen(),
+                            MechanicsScreen(),
                             UpgradesScreen(),
                             FinanceScreen(),
                           ],

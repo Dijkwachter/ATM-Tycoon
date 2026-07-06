@@ -8,6 +8,8 @@ import 'package:atm_empire/models/enums.dart';
 import 'package:atm_empire/models/game_state.dart';
 import 'package:atm_empire/models/hive_adapters.dart';
 import 'package:atm_empire/models/mechanic.dart';
+import 'package:atm_empire/models/staff.dart';
+import 'package:atm_empire/models/upgrade.dart';
 import 'package:atm_empire/persistence/save_repository.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive/hive.dart';
@@ -70,6 +72,7 @@ void main() {
           status: CitVanStatus.transitToAtm,
           targetAtmId: 9,
           ticksRemaining: 12,
+          stopsRemaining: 2,
         ),
       ],
       mechanics: const [
@@ -141,6 +144,7 @@ void main() {
     expect(restored.citVans.last.status, CitVanStatus.transitToAtm);
     expect(restored.citVans.last.targetAtmId, 9);
     expect(restored.citVans.last.ticksRemaining, 12);
+    expect(restored.citVans.last.stopsRemaining, 2);
 
     expect(restored.mechanics.length, 2);
     expect(restored.mechanics.first.status, CitVanStatus.servicing);
@@ -276,6 +280,73 @@ void main() {
       expect(migrated.balance, 777);
       expect(migrated.citVans.length, kStartingCitVans);
       expect(migrated.citVans.every((v) => v.isIdle), isTrue);
+    });
+
+    test('een CIT-wagen zonder stops-veld leest als 0 extra stops', () {
+      // Het oude CitVan-formaat (voor de High-Capacity Kluis): id, status,
+      // ticks, doelvlag - zonder sentinel.
+      final writer = BinaryWriterImpl(Hive);
+      writer
+        ..writeInt(3)
+        ..writeInt(CitVanStatus.transitToAtm.index)
+        ..writeInt(14)
+        ..writeBool(true)
+        ..writeInt(9);
+
+      final van = CitVanAdapter().read(
+        BinaryReaderImpl(writer.toBytes(), Hive),
+      );
+      expect(van.id, 3);
+      expect(van.status, CitVanStatus.transitToAtm);
+      expect(van.ticksRemaining, 14);
+      expect(van.targetAtmId, 9);
+      expect(van.stopsRemaining, 0);
+    });
+
+    test('oudere upgrade- en staflijsten worden op de nieuwe enums '
+        'aangevuld', () {
+      // Een save van voor de CiT/Monteurs-tabbladen kende drie upgrades
+      // en vier personeelsleden; de nieuwe slots moeten op level 0 en
+      // niet-aangenomen binnenkomen in plaats van een RangeError.
+      final state = singleAtmState(balance: 500);
+      final writer = BinaryWriterImpl(Hive);
+      writer
+        ..writeDouble(state.balance)
+        ..writeDouble(state.totalEarned)
+        ..writeList(state.atms)
+        ..writeList(state.banks)
+        ..writeList(const [
+          Upgrade(id: UpgradeId.cassettes),
+          Upgrade(id: UpgradeId.ibns, level: 2),
+          Upgrade(id: UpgradeId.citRoute, level: 1),
+        ])
+        ..writeList(const [
+          Staff(id: StaffId.mechanic, hired: true),
+          Staff(id: StaffId.citPlanner),
+          Staff(id: StaffId.analyst),
+          Staff(id: StaffId.regionalManager),
+        ])
+        ..writeInt(state.prestigeLevel)
+        ..writeInt(state.milestonesClaimed)
+        ..writeInt(state.refillGoalRound)
+        ..writeInt(state.refillGoalProgress)
+        ..writeInt(state.tick)
+        ..writeInt(state.nextEventInSeconds)
+        ..writeBool(false);
+
+      final migrated = GameStateAdapter().read(
+        BinaryReaderImpl(writer.toBytes(), Hive),
+      );
+      expect(migrated.upgrades.length, UpgradeId.values.length);
+      expect(migrated.upgradeLevel(UpgradeId.ibns), 2);
+      expect(migrated.upgradeLevel(UpgradeId.citRoute), 1);
+      expect(migrated.upgradeLevel(UpgradeId.armoredChassis), 0);
+      expect(migrated.upgradeLevel(UpgradeId.vaultCapacity), 0);
+      expect(migrated.upgradeLevel(UpgradeId.toolkit), 0);
+      expect(migrated.upgradeLevel(UpgradeId.partsDepot), 0);
+      expect(migrated.staff.length, StaffId.values.length);
+      expect(migrated.hasStaff(StaffId.mechanic), isTrue);
+      expect(migrated.hasStaff(StaffId.reliabilityAnalyst), isFalse);
     });
   });
 }

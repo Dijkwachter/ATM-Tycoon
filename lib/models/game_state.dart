@@ -195,10 +195,17 @@ class GameState {
         math.max(0, atms.length - (kFlatPricedAtmCount - 1)),
       );
 
-  /// Reparatieduur bij uitval, korter met monteur (GDD 4).
-  int get repairDurationSeconds => hasStaff(StaffId.mechanic)
-      ? kRepairDurationMechanicSeconds
-      : kRepairDurationSeconds;
+  /// Reparatieduur bij uitval, korter met monteur (GDD 4). Gereedschap &
+  /// Diagnose-software verkort de tijd ter plaatse met
+  /// [kToolkitReductionPerLevel] per level (Ontwerper dd 2026-07-06).
+  int get repairDurationSeconds {
+    final base = hasStaff(StaffId.mechanic)
+        ? kRepairDurationMechanicSeconds
+        : kRepairDurationSeconds;
+    final factor =
+        1 - kToolkitReductionPerLevel * upgradeLevel(UpgradeId.toolkit);
+    return math.max(1, (base * factor).round());
+  }
 
   /// Kosten van een CIT-rit na routeoptimalisatie (GDD 3.2 en 7.1).
   double get citTripCost =>

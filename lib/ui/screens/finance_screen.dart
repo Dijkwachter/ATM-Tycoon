@@ -5,16 +5,16 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/constants.dart';
 import '../../engine/game_controller.dart';
-import '../../models/cit_van.dart';
 import '../../models/enums.dart';
 import '../../models/game_state.dart';
-import '../../models/mechanic.dart';
 import '../format.dart';
 import '../theme.dart';
 import '../widgets/tactile_button.dart';
 
 /// Financien-tab: banken en contracten (GDD 8), mijlpalen en het
 /// bijvuldoel (GDD 9.2) en prestige met dubbele tikbevestiging (GDD 9.3).
+/// Het vloot- en monteursbeheer staat op de eigen tabbladen CiT en
+/// Monteurs (Ontwerper dd 2026-07-06).
 class FinanceScreen extends ConsumerWidget {
   const FinanceScreen({super.key});
 
@@ -25,21 +25,6 @@ class FinanceScreen extends ConsumerWidget {
     BankId.zuider: 'Zuiderbank',
   };
 
-  static const _shortLocationNames = {
-    LocationType.station: 'Station',
-    LocationType.winkel: 'Winkel',
-    LocationType.winkelcentrum: 'Centrum',
-    LocationType.horeca: 'Horeca',
-    LocationType.evenement: 'Stadion',
-    LocationType.reizen: 'Luchthaven',
-    LocationType.zorg: 'Zorg',
-    LocationType.snelweg: 'Snelweg',
-    LocationType.openbaar: 'Openbaar',
-  };
-
-  static String _shortLocation(LocationType location) =>
-      _shortLocationNames[location]!;
-
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final state = ref.watch(gameControllerProvider);
@@ -49,10 +34,6 @@ class FinanceScreen extends ConsumerWidget {
       padding: const EdgeInsets.only(top: 8, bottom: 96),
       children: [
         _OverviewCard(state: state),
-        const _SectionTitle('CIT-vloot'),
-        _FleetCard(state: state, onBuyVan: controller.buyCitVan),
-        const _SectionTitle('Monteursploeg'),
-        _MechanicsCard(state: state, onBuyMechanic: controller.buyMechanic),
         const _SectionTitle('Banken en contracten'),
         for (final id in BankId.values)
           _BankCard(
@@ -139,178 +120,6 @@ class _OverviewCard extends StatelessWidget {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-/// Vlootbeheer (Ontwerper dd 2026-07-04): per geldwagen de status, plus de
-/// koopknop voor een extra wagen. Zijn alle wagens onderweg, dan kan er
-/// nergens acuut geserviced worden - dat is precies de spanning.
-class _FleetCard extends StatelessWidget {
-  const _FleetCard({required this.state, required this.onBuyVan});
-
-  final GameState state;
-  final VoidCallback onBuyVan;
-
-  String _vanStatus(CitVan van) {
-    final target = state.atms.where((a) => a.id == van.targetAtmId).firstOrNull;
-    final where = target == null
-        ? ''
-        : ' - ${FinanceScreen._shortLocation(target.location)}';
-    return switch (van.status) {
-      CitVanStatus.idle => 'stand-by bij het depot',
-      CitVanStatus.transitToAtm => 'onderweg$where (${van.ticksRemaining}s)',
-      CitVanStatus.servicing => 'servicing$where (${van.ticksRemaining}s)',
-      CitVanStatus.returning => 'terugreis (${van.ticksRemaining}s)',
-    };
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final fleetFull = state.citVans.length >= kMaxCitVans;
-    final affordable = state.balance >= state.nextCitVanPrice;
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            for (final van in state.citVans)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 3),
-                child: Row(
-                  children: [
-                    Icon(
-                      Icons.local_shipping_outlined,
-                      size: 18,
-                      color: van.isIdle
-                          ? AppColors.incomePill
-                          : AppColors.ink.withValues(alpha: 0.6),
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      'Wagen ${van.id + 1}',
-                      style: const TextStyle(
-                        fontFamily: kTextFont,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 13,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        _vanStatus(van),
-                        textAlign: TextAlign.right,
-                        style: TextStyle(
-                          fontFamily: kDigitFont,
-                          fontSize: 11.5,
-                          color: AppColors.ink.withValues(alpha: 0.7),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            const SizedBox(height: 8),
-            TactileButton(
-              label: fleetFull ? 'Vloot compleet' : 'Koop geldwagen',
-              sublabel: fleetFull
-                  ? '$kMaxCitVans wagens'
-                  : formatEuroCompact(state.nextCitVanPrice),
-              color: AppColors.serviceButton,
-              onPressed: !fleetFull && affordable ? onBuyVan : null,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// Monteursbeheer (Ontwerper dd 2026-07-06): storingen wachten op een
-/// monteur die moet aanrijden; per monteur de status, plus de koopknop
-/// voor een extra monteur. Zijn ze allemaal onderweg, dan blijft een
-/// nieuwe storing liggen.
-class _MechanicsCard extends StatelessWidget {
-  const _MechanicsCard({required this.state, required this.onBuyMechanic});
-
-  final GameState state;
-  final VoidCallback onBuyMechanic;
-
-  String _mechanicStatus(ServiceMechanic mechanic) {
-    final target = state.atms
-        .where((a) => a.id == mechanic.targetAtmId)
-        .firstOrNull;
-    final where = target == null
-        ? ''
-        : ' - ${FinanceScreen._shortLocation(target.location)}';
-    return switch (mechanic.status) {
-      CitVanStatus.idle => 'stand-by bij het depot',
-      CitVanStatus.transitToAtm =>
-        'onderweg$where (${mechanic.ticksRemaining}s)',
-      CitVanStatus.servicing => 'repareert$where (${mechanic.ticksRemaining}s)',
-      CitVanStatus.returning => 'terugreis (${mechanic.ticksRemaining}s)',
-    };
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final crewFull = state.mechanics.length >= kMaxMechanics;
-    final affordable = state.balance >= state.nextMechanicPrice;
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            for (final mechanic in state.mechanics)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 3),
-                child: Row(
-                  children: [
-                    Icon(
-                      Icons.engineering_outlined,
-                      size: 18,
-                      color: mechanic.isIdle
-                          ? AppColors.incomePill
-                          : AppColors.ink.withValues(alpha: 0.6),
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      'Monteur ${mechanic.id + 1}',
-                      style: const TextStyle(
-                        fontFamily: kTextFont,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 13,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        _mechanicStatus(mechanic),
-                        textAlign: TextAlign.right,
-                        style: TextStyle(
-                          fontFamily: kDigitFont,
-                          fontSize: 11.5,
-                          color: AppColors.ink.withValues(alpha: 0.7),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            const SizedBox(height: 8),
-            TactileButton(
-              label: crewFull ? 'Ploeg compleet' : 'Neem monteur aan',
-              sublabel: crewFull
-                  ? '$kMaxMechanics monteurs'
-                  : formatEuroCompact(state.nextMechanicPrice),
-              color: AppColors.warning,
-              onPressed: !crewFull && affordable ? onBuyMechanic : null,
-            ),
-          ],
-        ),
       ),
     );
   }

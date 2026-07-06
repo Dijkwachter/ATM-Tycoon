@@ -56,7 +56,8 @@ class _PillOverlayState extends State<PillOverlay> {
       type == FeedbackType.income ||
       type == FeedbackType.dcc ||
       type == FeedbackType.recycling ||
-      type == FeedbackType.insurance;
+      type == FeedbackType.insurance ||
+      type == FeedbackType.robbery;
 
   @override
   void dispose() {
@@ -110,6 +111,7 @@ class _PillChip extends StatelessWidget {
   Color get _color => switch (event.type) {
     FeedbackType.dcc => AppColors.dccPill,
     FeedbackType.recycling => AppColors.recyclingPill,
+    FeedbackType.robbery => AppColors.warning,
     _ => AppColors.incomePill,
   };
 
@@ -122,7 +124,8 @@ class _PillChip extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
       ),
       child: Text(
-        '+${formatEuro(event.amount)}',
+        '${event.type == FeedbackType.robbery ? '-' : '+'}'
+        '${formatEuro(event.amount)}',
         style: const TextStyle(
           fontFamily: kDigitFont,
           fontSize: 11,

@@ -68,8 +68,10 @@ void main() {
     expect(find.text('Servicing'), findsNothing);
     expect(find.textContaining('Welkom!'), findsOneWidget);
     expect(find.text('Locaties: 0 van 3'), findsOneWidget);
-    // Tabbar met drie tabs.
+    // Tabbar met vijf tabs (Ontwerper dd 2026-07-06).
     expect(find.text('Kaart'), findsOneWidget);
+    expect(find.text('CiT'), findsOneWidget);
+    expect(find.text('Monteurs'), findsOneWidget);
     expect(find.text('Upgrades'), findsOneWidget);
     expect(find.text('Financien'), findsOneWidget);
 
@@ -100,18 +102,52 @@ void main() {
     await tearDownApp(tester);
   });
 
-  testWidgets('tabs wisselen naar Upgrades en Financien', (tester) async {
+  testWidgets('tabs wisselen naar CiT, Monteurs, Upgrades en Financien', (
+    tester,
+  ) async {
     await startGame(tester);
 
+    // CiT-tabblad: het vloot-dashboard en de transport-upgrades.
+    await tester.tap(find.text('CiT'));
+    await tester.pump();
+    expect(find.text('Waardetransport 1'), findsOneWidget);
+    expect(find.text('Gepantserd Chassis'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.text('High-Capacity Kluis'),
+      200,
+      scrollable: find.byType(Scrollable).last,
+    );
+    expect(find.text('Route-optimalisatie GPS'), findsOneWidget);
+    expect(find.text('High-Capacity Kluis'), findsOneWidget);
+
+    // Monteurs-tabblad: de servicebussen en de technische upgrades.
+    await tester.tap(find.text('Monteurs'));
+    await tester.pump();
+    expect(find.text('Servicebus 1'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.text('Gereedschap & Diagnose-software'),
+      200,
+      scrollable: find.byType(Scrollable).last,
+    );
+    expect(find.text('Gereedschap & Diagnose-software'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.text('Storings-Analist'),
+      200,
+      scrollable: find.byType(Scrollable).last,
+    );
+    expect(find.text('Storings-Analist'), findsOneWidget);
+
+    // Upgrades-tabblad: alleen nog de netwerkbrede upgrades en staf.
     await tester.tap(find.text('Upgrades'));
     await tester.pump();
     expect(find.text('Netwerk-upgrades'), findsOneWidget);
-    expect(find.text('Monteur Sven'), findsOneWidget);
+    expect(find.text('Data-analist Kim'), findsOneWidget);
+    expect(find.text('Monteur Sven'), findsNothing);
 
+    // Financien-tabblad: banken direct bovenin nu de vloot verhuisd is.
     await tester.tap(find.text('Financien'));
     await tester.pump();
-    expect(find.text('CIT-vloot'), findsOneWidget);
-    expect(find.text('Monteursploeg'), findsOneWidget);
+    expect(find.text('CIT-vloot'), findsNothing);
     await tester.scrollUntilVisible(
       find.text('Zuiderbank'),
       200,

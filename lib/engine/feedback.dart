@@ -26,6 +26,14 @@ enum FeedbackType {
 
   /// Een CIT-wagen heeft een automaat gevuld en gerepareerd.
   serviced,
+
+  /// Een geldwagen is onderweg overvallen: rode pill met het verlies
+  /// (Ontwerper dd 2026-07-06, CiT-tabblad).
+  robbery,
+
+  /// De Storings-Analist meldt een verhoogd storingsrisico op een
+  /// cassette: notificatie plus audio-alert.
+  jamRisk,
 }
 
 class GameFeedback {

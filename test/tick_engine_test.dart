@@ -1,4 +1,5 @@
 import 'package:atm_empire/core/constants.dart';
+import 'package:atm_empire/engine/feedback.dart';
 import 'package:atm_empire/engine/tick_engine.dart';
 import 'package:atm_empire/models/atm.dart';
 import 'package:atm_empire/models/cassette.dart';
@@ -1234,6 +1235,238 @@ void main() {
         [10, 20],
       );
       expect(s.atms.first.cassettes[1].notes, kCassetteCapacityUnits);
+    });
+  });
+
+  group('CiT & Monteurs tabbladen (Ontwerper dd 2026-07-06)', () {
+    test('een onbeveiligde wagen kan onderweg overvallen worden', () {
+      final events = <GameFeedback>[];
+      // De automaat staat volledig in storing (geen aanloop-rolls) en de
+      // monteursploeg is leeg, zodat alleen de overval-roll van de
+      // heenreis doubles consumeert: tick 1 mist (0,999), tick 2 raak.
+      final engine = TickEngine(random: FakeRandom(doubles: [0.999, 0.0005]))
+        ..onFeedback = events.add;
+      var s = singleAtmState(
+        notesInCassette: 0,
+        repairSecondsRemaining: 1000,
+      ).copyWith(mechanics: const []);
+      s = engine.requestService(s, 0);
+      expect(s.balance, 1000 - kCitCostPerTrip);
+
+      s = engine.tick(s);
+      expect(s.citVans.single.status, CitVanStatus.transitToAtm);
+
+      s = engine.tick(s);
+      expect(s.citVans.single.status, CitVanStatus.returning);
+      expect(s.balance, 1000 - kCitCostPerTrip - kCitRobberyLoss);
+      expect(events.where((e) => e.type == FeedbackType.robbery).length, 1);
+
+      // De terugweg is de afgelegde afstand (1 tick); de rit heeft niets
+      // opgeleverd: de automaat blijft leeg en in storing.
+      s = engine.tick(s);
+      expect(s.citVans.single.isIdle, isTrue);
+      expect(s.citVans.single.targetAtmId, isNull);
+      expect(s.atms.first.isBroken, isTrue);
+      expect(s.atms.first.notesInCassette, 0);
+      expect(s.refillGoalProgress, 0);
+    });
+
+    test('het gepantserd chassis sluit overvallen volledig uit', () {
+      final events = <GameFeedback>[];
+      // Dezelfde rake rolls als hierboven: met pantser wordt er niet
+      // eens gerold, dus de rit loopt gewoon af.
+      final engine = TickEngine(random: FakeRandom(doubles: [0.0, 0.0]))
+        ..onFeedback = events.add;
+      var s = withUpgradeLevel(
+        singleAtmState(notesInCassette: 0, repairSecondsRemaining: 1000),
+        UpgradeId.armoredChassis,
+        1,
+      ).copyWith(mechanics: const []);
+      s = engine.requestService(s, 0);
+      final travel = s.travelTicksTo(LocationType.station);
+      for (var i = 0; i < travel + kServicingDurationTicks; i++) {
+        s = engine.tick(s);
+      }
+      expect(events.where((e) => e.type == FeedbackType.robbery), isEmpty);
+      expect(s.atms.first.isBroken, isFalse);
+      expect(s.atms.first.notesInCassette, kCassetteCapacityUnits);
+      expect(s.citVans.single.status, CitVanStatus.returning);
+    });
+
+    test('de High-Capacity Kluis laat een wagen doorrijden naar de volgende '
+        'lege automaat', () {
+      final engine = TickEngine(random: FakeRandom());
+      var s = GameState.initial(nextEventInSeconds: 1000000).copyWith(
+        balance: 5000,
+        totalEarned: 100000,
+        milestonesClaimed: claimedMilestonesFor(100000),
+      );
+      s = engine.buyAtm(s, LocationType.station);
+      s = engine.buyAtm(s, LocationType.winkel);
+      s = withFirstCassette(s, notes: 0);
+      s = s.withAtm(
+        s.atms.last.withCassette(
+          0,
+          s.atms.last.cassettes.first.copyWith(notes: 0),
+        ),
+      );
+      s = withUpgradeLevel(s, UpgradeId.vaultCapacity, 1);
+
+      final balanceBefore = s.balance;
+      s = engine.requestService(s, 0);
+      // Een rit, een keer het rittarief, met een extra stop in de kluis.
+      expect(s.balance, closeTo(balanceBefore - s.citTripCost, 1e-9));
+      expect(s.citVans.single.stopsRemaining, 1);
+
+      final travelA = s.travelTicksTo(LocationType.station);
+      for (var i = 0; i < travelA + kServicingDurationTicks; i++) {
+        s = engine.tick(s);
+      }
+      // Eerste stop bediend; de wagen rijdt direct door naar de tweede.
+      expect(s.atms.first.notesInCassette, kCassetteCapacityUnits);
+      expect(s.citVans.single.status, CitVanStatus.transitToAtm);
+      expect(s.citVans.single.targetAtmId, 1);
+      expect(s.citVans.single.stopsRemaining, 0);
+      expect(s.refillGoalProgress, 1);
+
+      final travelB = s.travelTicksTo(LocationType.winkel);
+      for (var i = 0; i < travelB + kServicingDurationTicks; i++) {
+        s = engine.tick(s);
+      }
+      expect(s.atms.last.notesInCassette, kCassetteCapacityUnits);
+      expect(s.citVans.single.status, CitVanStatus.returning);
+      expect(s.refillGoalProgress, 2);
+    });
+
+    test('zonder kluis-upgrade rijdt de wagen na een stop terug', () {
+      final engine = TickEngine(random: FakeRandom());
+      var s = GameState.initial(nextEventInSeconds: 1000000).copyWith(
+        balance: 5000,
+        totalEarned: 100000,
+        milestonesClaimed: claimedMilestonesFor(100000),
+      );
+      s = engine.buyAtm(s, LocationType.station);
+      s = engine.buyAtm(s, LocationType.winkel);
+      s = withFirstCassette(s, notes: 0);
+      s = s.withAtm(
+        s.atms.last.withCassette(
+          0,
+          s.atms.last.cassettes.first.copyWith(notes: 0),
+        ),
+      );
+      s = engine.requestService(s, 0);
+      expect(s.citVans.single.stopsRemaining, 0);
+      final travel = s.travelTicksTo(LocationType.station);
+      for (var i = 0; i < travel + kServicingDurationTicks; i++) {
+        s = engine.tick(s);
+      }
+      expect(s.citVans.single.status, CitVanStatus.returning);
+      expect(s.atms.last.notesInCassette, 0);
+    });
+
+    test('gereedschap & diagnose-software verkort de reparatietijd', () {
+      var s = singleAtmState();
+      expect(s.repairDurationSeconds, kRepairDurationSeconds);
+      s = withUpgradeLevel(s, UpgradeId.toolkit, kToolkitMaxLevel);
+      expect(
+        s.repairDurationSeconds,
+        (kRepairDurationSeconds *
+                (1 - kToolkitReductionPerLevel * kToolkitMaxLevel))
+            .round(),
+      );
+      // Stapelt met monteur Sven; afgerond en nooit onder 1 seconde.
+      s = withStaffHired(s, StaffId.mechanic);
+      expect(
+        s.repairDurationSeconds,
+        (kRepairDurationMechanicSeconds *
+                (1 - kToolkitReductionPerLevel * kToolkitMaxLevel))
+            .round(),
+      );
+    });
+
+    test('het onderdelenmagazijn stuurt monteurs preventief uit, zonder '
+        'voorrijkosten', () {
+      final engine = TickEngine(random: FakeRandom());
+      var s = withUpgradeLevel(
+        singleAtmState(notesInCassette: 0, condition: 0.5),
+        UpgradeId.partsDepot,
+        1,
+      );
+      s = engine.tick(s);
+      expect(s.mechanics.single.status, CitVanStatus.transitToAtm);
+      expect(s.mechanics.single.targetAtmId, 0);
+      // Preventief is regulier onderhoud: geen nood-tarief.
+      expect(s.balance, 1000);
+
+      // Ter plaatse pleegt de monteur het volledige onderhoud.
+      final travel = s.travelTicksTo(LocationType.station);
+      for (var i = 0; i < travel + s.repairDurationSeconds; i++) {
+        s = engine.tick(s);
+      }
+      expect(s.atms.first.condition, closeTo(1 - kWearPerSecond, 1e-9));
+      expect(s.mechanics.single.status, CitVanStatus.returning);
+    });
+
+    test('zonder onderdelenmagazijn blijft de monteur bij het depot', () {
+      final engine = TickEngine(random: FakeRandom());
+      final s = engine.tick(singleAtmState(notesInCassette: 0, condition: 0.5));
+      expect(s.mechanics.single.isIdle, isTrue);
+    });
+
+    test('de storings-analist meldt verhoogd risico precies een keer per '
+        'passage', () {
+      final events = <GameFeedback>[];
+      final engine = TickEngine(random: FakeRandom())..onFeedback = events.add;
+      var s = withStaffHired(
+        singleAtmState(
+          notesInCassette: 0,
+          condition: kJamRiskConditionThreshold + kWearPerSecond / 2,
+        ),
+        StaffId.reliabilityAnalyst,
+      );
+      s = engine.tick(s);
+      final alerts = events.where((e) => e.type == FeedbackType.jamRisk);
+      expect(alerts.length, 1);
+      expect(alerts.single.atmId, 0);
+      // Onder de drempel blijft het stil: een melding per passage.
+      s = engine.tick(s);
+      s = engine.tick(s);
+      expect(events.where((e) => e.type == FeedbackType.jamRisk).length, 1);
+    });
+
+    test('zonder storings-analist geen risicomelding', () {
+      final events = <GameFeedback>[];
+      final engine = TickEngine(random: FakeRandom())..onFeedback = events.add;
+      engine.tick(
+        singleAtmState(
+          notesInCassette: 0,
+          condition: kJamRiskConditionThreshold + kWearPerSecond / 2,
+        ),
+      );
+      expect(events.where((e) => e.type == FeedbackType.jamRisk), isEmpty);
+    });
+
+    test('handmatige dispatch stuurt een vrije monteur met voorrijkosten', () {
+      final engine = TickEngine(random: FakeRandom());
+      var s = singleAtmState(notesInCassette: 0, repairSecondsRemaining: 1000);
+      final callout = s.atms.first.calloutCost;
+      s = engine.sendMechanic(s, 0);
+      expect(s.mechanics.single.status, CitVanStatus.transitToAtm);
+      expect(s.mechanics.single.targetAtmId, 0);
+      expect(
+        s.mechanics.single.ticksRemaining,
+        s.travelTicksTo(LocationType.station),
+      );
+      expect(s.balance, 1000 - callout);
+
+      // Nogmaals sturen doet niets: er is al iemand onderweg.
+      final again = engine.sendMechanic(s, 0);
+      expect(again.balance, s.balance);
+
+      // Naar een gezonde automaat vertrekt niemand.
+      final unchanged = engine.sendMechanic(singleAtmState(), 0);
+      expect(unchanged.mechanics.single.isIdle, isTrue);
+      expect(unchanged.balance, 1000);
     });
   });
 }

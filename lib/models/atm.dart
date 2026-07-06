@@ -304,15 +304,15 @@ class Atm {
   }
 
   /// Na een afgeronde monteursreparatie: alle storingen verholpen en de
-  /// staat terug op 100%; de inhoud blijft onaangeroerd (de monteur
-  /// brengt geen geld mee - dat doet de CIT).
+  /// staat van elke cassette terug op 100% (de monteur neemt meteen het
+  /// onderhoud van de hele kast mee, Ontwerper dd 2026-07-06); de inhoud
+  /// blijft onaangeroerd (de monteur brengt geen geld mee - dat doet de
+  /// CIT).
   Atm repaired() {
     return copyWith(
       cassettes: [
         for (final c in cassettes)
-          c.isBroken
-              ? c.copyWith(repairSecondsRemaining: 0, condition: 1.0)
-              : c,
+          c.copyWith(repairSecondsRemaining: 0, condition: 1.0),
       ],
     );
   }

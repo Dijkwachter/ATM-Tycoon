@@ -18,18 +18,30 @@ class Upgrade {
     UpgradeId.cassettes => 0,
     UpgradeId.ibns => kIbnsUpgradeBasePrice,
     UpgradeId.citRoute => kCitRouteUpgradeBasePrice,
+    UpgradeId.armoredChassis => kArmoredChassisPrice,
+    UpgradeId.vaultCapacity => kVaultUpgradeBasePrice,
+    UpgradeId.toolkit => kToolkitBasePrice,
+    UpgradeId.partsDepot => kPartsDepotPrice,
   };
 
   double get growthFactor => switch (id) {
     UpgradeId.cassettes => 1,
     UpgradeId.ibns => kIbnsUpgradeGrowth,
     UpgradeId.citRoute => kCitRouteUpgradeGrowth,
+    UpgradeId.armoredChassis => 1,
+    UpgradeId.vaultCapacity => kVaultUpgradeGrowth,
+    UpgradeId.toolkit => kToolkitGrowth,
+    UpgradeId.partsDepot => 1,
   };
 
   int get maxLevel => switch (id) {
     UpgradeId.cassettes => 0,
     UpgradeId.ibns => kIbnsUpgradeMaxLevel,
     UpgradeId.citRoute => kCitRouteUpgradeMaxLevel,
+    UpgradeId.armoredChassis => 1,
+    UpgradeId.vaultCapacity => kVaultUpgradeMaxLevel,
+    UpgradeId.toolkit => kToolkitMaxLevel,
+    UpgradeId.partsDepot => 1,
   };
 
   bool get isMaxed => level >= maxLevel;
