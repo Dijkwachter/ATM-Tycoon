@@ -10,7 +10,7 @@ class LedDisplay extends StatelessWidget {
     super.key,
     required this.value,
     this.fontSize = 34,
-    this.prefix = 'EUR ',
+    this.prefix = '€ ',
     this.decimals = 2,
   });
 

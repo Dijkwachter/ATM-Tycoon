@@ -19,12 +19,15 @@ String formatEuro(double value, {int decimals = 2}) {
   return negative ? '-$result' : result;
 }
 
-/// Compact bedrag voor knoppen: geen decimalen bij ronde bedragen.
+/// Compact bedrag voor knoppen en chips, altijd met euroteken zodat elk
+/// getal in de UI als geldbedrag herkenbaar is (speler dd 2026-07-06):
+/// geen decimalen bij ronde bedragen.
 String formatEuroCompact(double value) {
   final rounded = value.roundToDouble();
-  return (value - rounded).abs() < 0.005
+  final formatted = (value - rounded).abs() < 0.005
       ? formatEuro(rounded, decimals: 0)
       : formatEuro(value);
+  return '€ $formatted';
 }
 
 /// Spelklok als HH:MM (een speluur duurt 5 echte seconden, GDD 5).

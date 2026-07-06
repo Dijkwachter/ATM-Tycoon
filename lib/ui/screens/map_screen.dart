@@ -491,7 +491,7 @@ class _AtmDetailSheet extends ConsumerWidget {
               ),
               _detailRow(
                 'Inkomen per opname',
-                'EUR '
+                '€ '
                     '${formatEuro(atm.baseIncome * atm.levelIncomeMultiplier)}',
               ),
               _detailRow(
@@ -513,7 +513,7 @@ class _AtmDetailSheet extends ConsumerWidget {
               _detailRow('Staat', '${(atm.condition * 100).round()}%'),
               _detailRow(
                 'Totaal verdiend',
-                'EUR ${formatEuro(atm.lifetimeEarned)}',
+                '€ ${formatEuro(atm.lifetimeEarned)}',
               ),
               _detailRow(
                 'Druktefactor nu',

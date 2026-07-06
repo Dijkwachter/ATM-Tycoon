@@ -178,7 +178,7 @@ class IntroScreen extends StatelessWidget {
                     ] else
                       TactileButton(
                         label: 'Start spel',
-                        sublabel: 'start met EUR 1.000',
+                        sublabel: 'start met € 1.000',
                         color: AppColors.serviceButton,
                         onPressed: () => _confirmNewGame(context),
                       ),

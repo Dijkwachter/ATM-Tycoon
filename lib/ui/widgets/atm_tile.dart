@@ -784,7 +784,7 @@ class _Machine extends StatelessWidget {
                   ),
                 ),
                 Text(
-                  formatEuro(atm.lifetimeEarned),
+                  '€ ${formatEuro(atm.lifetimeEarned)}',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: ledDigits(11),

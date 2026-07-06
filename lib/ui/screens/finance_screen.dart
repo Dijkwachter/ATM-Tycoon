@@ -87,13 +87,13 @@ class _OverviewCard extends StatelessWidget {
         padding: const EdgeInsets.all(12),
         child: Column(
           children: [
-            _row('Saldo', 'EUR ${formatEuro(state.balance)}'),
-            _row('Totaal verdiend', 'EUR ${formatEuro(state.totalEarned)}'),
+            _row('Saldo', '€ ${formatEuro(state.balance)}'),
+            _row('Totaal verdiend', '€ ${formatEuro(state.totalEarned)}'),
             _row(
               'Cash in cassettes (float)',
-              'EUR ${formatEuro(state.totalFloatValue, decimals: 0)}',
+              '€ ${formatEuro(state.totalFloatValue, decimals: 0)}',
             ),
-            _row('CIT-rit', 'EUR ${formatEuroCompact(state.citTripCost)}'),
+            _row('CIT-rit', formatEuroCompact(state.citTripCost)),
             if (state.prestigeLevel > 0)
               _row(
                 'Prestigebonus',

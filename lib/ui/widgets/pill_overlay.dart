@@ -125,7 +125,7 @@ class _PillChip extends StatelessWidget {
       ),
       child: Text(
         '${event.type == FeedbackType.robbery ? '-' : '+'}'
-        '${formatEuro(event.amount)}',
+        '€ ${formatEuro(event.amount)}',
         style: const TextStyle(
           fontFamily: kDigitFont,
           fontSize: 11,
